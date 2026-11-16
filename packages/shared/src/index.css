@@ -1,0 +1,271 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/plus-jakarta-sans";
+
+/* monorepo: pindai kelas Tailwind dari kode bersama (aplikasi berada di folder lain) */
+@source "./";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: 'Plus Jakarta Sans Variable', ui-sans-serif, system-ui, sans-serif;
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-scope1: var(--scope1);
+    --color-scope2: var(--scope2);
+    --color-scope3: var(--scope3);
+    --color-leaf: var(--leaf);
+    --color-primary-deep: var(--primary-deep);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+    --background: oklch(0.963 0.005 150);
+    --foreground: oklch(0.2 0.02 160);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.2 0.02 160);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.2 0.02 160);
+    --primary: oklch(0.48 0.115 156);
+    --primary-foreground: oklch(0.99 0.01 150);
+    --primary-deep: oklch(0.33 0.07 160);
+    --secondary: oklch(0.96 0.02 150);
+    --secondary-foreground: oklch(0.3 0.06 160);
+    --muted: oklch(0.955 0.008 150);
+    --muted-foreground: oklch(0.52 0.02 160);
+    --accent: oklch(0.95 0.03 155);
+    --accent-foreground: oklch(0.3 0.07 160);
+    --destructive: oklch(0.577 0.22 27);
+    --border: oklch(0.55 0.13 158 / 22%);
+    --input: oklch(0.9 0.012 150);
+    --ring: oklch(0.62 0.12 158);
+    --chart-1: oklch(0.48 0.115 156);
+    --chart-2: oklch(0.7 0.14 75);
+    --chart-3: oklch(0.6 0.12 240);
+    --chart-4: oklch(0.65 0.16 30);
+    --chart-5: oklch(0.6 0.1 300);
+    --radius: 0.75rem;
+    --sidebar: oklch(0.995 0.002 150);
+    --sidebar-foreground: oklch(0.25 0.03 160);
+    --sidebar-primary: oklch(0.48 0.115 156);
+    --sidebar-primary-foreground: oklch(0.99 0.01 150);
+    --sidebar-accent: oklch(0.93 0.035 155);
+    --sidebar-accent-foreground: oklch(0.28 0.07 160);
+    --sidebar-border: oklch(0.55 0.13 158 / 22%);
+    --sidebar-ring: oklch(0.62 0.12 158);
+    --scope1: oklch(0.76 0.13 78);
+    --scope2: oklch(0.34 0.07 160);
+    --scope3: oklch(0.55 0.12 155);
+    --leaf: oklch(0.6 0.14 150);
+}
+
+.dark {
+    --background: oklch(0.185 0.012 165);
+    --foreground: oklch(0.96 0.01 150);
+    --card: oklch(0.235 0.014 165);
+    --card-foreground: oklch(0.96 0.01 150);
+    --popover: oklch(0.21 0.014 165);
+    --popover-foreground: oklch(0.96 0.01 150);
+    --primary: oklch(0.72 0.14 158);
+    --primary-foreground: oklch(0.18 0.03 165);
+    --primary-deep: oklch(0.32 0.065 160);
+    --secondary: oklch(0.26 0.02 165);
+    --secondary-foreground: oklch(0.94 0.01 150);
+    --muted: oklch(0.275 0.015 165);
+    --muted-foreground: oklch(0.7 0.02 155);
+    --accent: oklch(0.28 0.03 160);
+    --accent-foreground: oklch(0.95 0.02 150);
+    --destructive: oklch(0.7 0.19 22);
+    --border: oklch(0.72 0.14 158 / 24%);
+    --input: oklch(1 0 0 / 14%);
+    --ring: oklch(0.6 0.12 158);
+    --chart-1: oklch(0.72 0.14 158);
+    --chart-2: oklch(0.78 0.14 80);
+    --chart-3: oklch(0.7 0.12 240);
+    --chart-4: oklch(0.72 0.15 35);
+    --chart-5: oklch(0.7 0.1 300);
+    --sidebar: oklch(0.15 0.011 165);
+    --sidebar-foreground: oklch(0.94 0.01 150);
+    --sidebar-primary: oklch(0.72 0.14 158);
+    --sidebar-primary-foreground: oklch(0.18 0.03 165);
+    --sidebar-accent: oklch(0.26 0.03 160);
+    --sidebar-accent-foreground: oklch(0.96 0.01 150);
+    --sidebar-border: oklch(0.72 0.14 158 / 24%);
+    --sidebar-ring: oklch(0.6 0.12 158);
+    --scope1: oklch(0.8 0.13 80);
+    --scope2: oklch(0.86 0.08 150);
+    --scope3: oklch(0.66 0.13 156);
+    --leaf: oklch(0.72 0.14 150);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    }
+  body {
+    @apply bg-background text-foreground;
+    }
+  html {
+    @apply font-sans;
+    }
+  /* Skala tipografi: di layar laptop/desktop seluruh UI (rem) diperkecil ~12,5%
+     agar padat seperti dasbor pada zoom 100%. HP tetap 16px (input tidak memicu zoom iOS). */
+  @media (min-width: 768px) { html { font-size: 87.5%; } }
+  @media (min-width: 1920px) { html { font-size: 93.75%; } }
+  html:has(.report-doc:not(.print-embed)) { font-size: 100%; }
+  @media print { html { font-size: 100% !important; } }
+  /* cegah grid melebar karena konten min-content (tabel, teks panjang) */
+  .grid > * { min-width: 0; }
+}
+@layer utilities {
+  .bg-grid {
+    background-image: radial-gradient(circle at 1px 1px, color-mix(in oklch, var(--foreground) 8%, transparent) 1px, transparent 0);
+    background-size: 22px 22px;
+  }
+  .tabular { font-variant-numeric: tabular-nums; }
+}
+@media print {
+  @page { size: A4; margin: 14mm; }
+  .no-print { display: none !important; }
+  body { background: white !important; }
+}
+
+/* halaman awal: animasi lembut */
+@keyframes float-y { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-8px) } }
+@keyframes fade-up { from { opacity: 0; transform: translateY(14px) } to { opacity: 1; transform: none } }
+@keyframes marquee-x { from { transform: translateX(0) } to { transform: translateX(-50%) } }
+.animate-float { animation: float-y 6s ease-in-out infinite }
+.animate-fade-up { animation: fade-up .7s cubic-bezier(.2,.8,.2,1) both }
+.animate-marquee { animation: marquee-x 40s linear infinite }
+@media (prefers-reduced-motion: reduce) { .animate-float, .animate-fade-up, .animate-marquee { animation: none } }
+input[type="range"].range { appearance: none; height: 8px; border-radius: 999px; background: linear-gradient(to right, var(--primary) var(--pct, 50%), var(--muted) var(--pct, 50%)); outline: none }
+input[type="range"].range::-webkit-slider-thumb { appearance: none; width: 22px; height: 22px; border-radius: 999px; background: var(--card); border: 3px solid var(--primary); box-shadow: 0 2px 6px rgb(0 0 0 / .15); cursor: pointer }
+input[type="range"].range::-moz-range-thumb { width: 18px; height: 18px; border-radius: 999px; background: var(--card); border: 3px solid var(--primary); cursor: pointer }
+
+/* ===== dokumen cetak A4 (Rapor Karbon) — selalu tema terang ===== */
+.report-doc {
+  color-scheme: light;
+  --background: oklch(0.963 0.005 150); --foreground: oklch(0.2 0.02 160); --card: oklch(1 0 0); --muted: oklch(0.955 0.008 150);
+  --muted-foreground: oklch(0.5 0.02 160); --border: oklch(0.55 0.13 158 / 22%); --primary: oklch(0.48 0.115 156); --primary-deep: oklch(0.33 0.07 160);
+  --scope1: oklch(0.76 0.13 78); --scope2: oklch(0.34 0.07 160); --scope3: oklch(0.55 0.12 155);
+  color: var(--foreground);
+}
+.report-doc .sheet { width: 210mm; min-height: 297mm; margin: 0 auto 24px; padding: 16mm 15mm 14mm; background: white; border-radius: 6px; box-shadow: 0 10px 40px rgb(0 0 0 / .08); position: relative }
+.report-doc table { width: 100%; border-collapse: collapse; font-size: 9.5pt }
+.report-doc th { text-align: left; font-weight: 600; color: var(--muted-foreground); font-size: 8pt; text-transform: uppercase; letter-spacing: .03em; padding: 6px 6px; border-bottom: 1.5px solid oklch(0.48 0.115 156 / 40%) }
+.report-doc td { padding: 5px 6px; border-bottom: 1px solid oklch(0.9 0.01 150) }
+.report-doc tr { break-inside: avoid }
+.report-doc .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap }
+@media print {
+  @page { size: A4; margin: 12mm 12mm 14mm;
+    @bottom-left { content: "Sekolah Lestari · Rapor Karbon"; font: 8pt sans-serif; color: #777 }
+    @bottom-right { content: "Halaman " counter(page) " dari " counter(pages); font: 8pt sans-serif; color: #777 } }
+  html, body { background: white !important }
+  .report-doc .sheet { width: auto; min-height: auto; margin: 0; padding: 0; box-shadow: none; border-radius: 0; break-after: page }
+  .report-doc .sheet:last-child { break-after: auto }
+  .report-doc * { -webkit-print-color-adjust: exact; print-color-adjust: exact }
+}
+
+/* ===== Beranda kampanye: animasi ===== */
+@keyframes grow-up { from { transform: scaleY(0) } to { transform: scaleY(1) } }
+@keyframes sway { 0%, 100% { transform: rotate(-2.5deg) } 50% { transform: rotate(2.5deg) } }
+@keyframes leaf-fall { 0% { transform: translate(0, -20px) rotate(0); opacity: 0 } 10% { opacity: 1 } 100% { transform: translate(var(--dx, 60px), 360px) rotate(360deg); opacity: 0 } }
+@keyframes drift { from { transform: translateX(-30px) } to { transform: translateX(30px) } }
+@keyframes pulse-ring { 0% { transform: scale(.9); opacity: .6 } 100% { transform: scale(1.5); opacity: 0 } }
+@keyframes pop-in { 0% { transform: scale(.6); opacity: 0 } 70% { transform: scale(1.08) } 100% { transform: scale(1); opacity: 1 } }
+.anim-grow { transform-origin: bottom; transform-box: fill-box; animation: grow-up 1.2s cubic-bezier(.2,.8,.2,1) both }
+.anim-sway { transform-origin: bottom center; transform-box: fill-box; animation: sway 5s ease-in-out infinite }
+.anim-leaf { animation: leaf-fall 9s linear infinite }
+.anim-drift { animation: drift 8s ease-in-out infinite alternate }
+.anim-pulse-ring { animation: pulse-ring 2.4s ease-out infinite }
+.anim-pop { animation: pop-in .45s cubic-bezier(.2,.8,.2,1) both }
+.reveal { opacity: 0; transform: translateY(28px); transition: opacity .8s cubic-bezier(.2,.8,.2,1), transform .8s cubic-bezier(.2,.8,.2,1) }
+.reveal.in { opacity: 1; transform: none }
+@media (prefers-reduced-motion: reduce) {
+  .anim-grow, .anim-sway, .anim-leaf, .anim-drift, .anim-pulse-ring, .anim-pop { animation: none }
+  .reveal { opacity: 1; transform: none; transition: none }
+}
+
+/* ===== visual orbit modern ===== */
+@keyframes spin-slow { to { transform: rotate(360deg) } }
+@keyframes spin-rev { to { transform: rotate(-360deg) } }
+@keyframes glow-breathe { 0%, 100% { opacity: .55; transform: scale(1) } 50% { opacity: .85; transform: scale(1.06) } }
+.anim-spin-slow { animation: spin-slow 40s linear infinite }
+.anim-spin-mid { animation: spin-slow 24s linear infinite }
+.anim-spin-rev { animation: spin-rev 32s linear infinite }
+.anim-glow { animation: glow-breathe 6s ease-in-out infinite }
+@media (prefers-reduced-motion: reduce) { .anim-spin-slow, .anim-spin-mid, .anim-spin-rev, .anim-glow { animation: none } }
+
+/* Cetak rapor langsung dari halaman dasbor: dokumen A4 tersembunyi di layar, hanya dia yang dicetak */
+.print-embed { display: none }
+@media print {
+  body:has(> .print-embed) > *:not(.print-embed) { display: none !important }
+  body > .print-embed { display: block !important }
+}
+
+/* ===== Aplikasi Petugas — gaya modern (kartu lembut, pastel hijau, tombol pil) =====
+   Hanya berlaku di dalam .fapp; halaman staf lain tidak terpengaruh. */
+.fapp {
+  --f-bg1: #eaf4ee; --f-bg2: #f6f9f7; --f-card: #ffffff; --f-soft: #f2f7f4; --f-line: rgba(18, 52, 36, 0.08);
+  --f-muted: #6f7f77; --f-ink: #10201a; --f-ink-fg: #ffffff;
+  --f-tint: var(--primary); --f-tint-soft: color-mix(in oklab, var(--primary) 13%, white);
+  --f-mint: #d6f0e2; --f-lime: #e3f1d0; --f-teal: #d2ecea; --f-sand: #f6ead6; --f-sky: #dcebf6; --f-rose: #fbe1dc;
+  --f-shadow: 0 10px 30px -12px rgba(16, 64, 42, 0.18), 0 2px 6px -2px rgba(16, 64, 42, 0.06);
+  background: radial-gradient(120% 60% at 0% 0%, var(--f-bg1) 0%, transparent 60%), linear-gradient(180deg, var(--f-bg2), var(--f-bg2));
+  background-attachment: fixed;
+  color: var(--f-ink);
+}
+.dark .fapp {
+  --f-bg1: #0f2a1f; --f-bg2: #0b120f; --f-card: #141e19; --f-soft: #1a2620; --f-line: rgba(255, 255, 255, 0.07);
+  --f-muted: #92a39a; --f-ink: #eef5f1; --f-ink-fg: #0b120f;
+  --f-tint-soft: color-mix(in oklab, var(--primary) 22%, #141e19);
+  --f-mint: #183528; --f-lime: #233420; --f-teal: #15312f; --f-sand: #33291a; --f-sky: #172736; --f-rose: #3a201c;
+  --f-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.6);
+}
+.fapp .f-card { background: var(--f-card); border-radius: 1.75rem; box-shadow: var(--f-shadow); }
+.fapp .f-dash { background-image: linear-gradient(90deg, currentColor 50%, transparent 50%); background-size: 7px 1.5px; background-repeat: repeat-x; background-position: center; }
+
+/* garis pindai QR yang bergerak naik-turun */
+@keyframes scan-y { 0%, 100% { top: 8%; opacity: 0.4 } 50% { top: 90%; opacity: 1 } }
+.anim-scan { animation: scan-y 2.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .anim-scan { animation: none; top: 50% } }
+
+/* lembar cetak kartu QR pohon */
+@media print { body > .tree-card-sheet { padding: 0; } }

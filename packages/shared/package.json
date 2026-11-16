@@ -1,0 +1,7 @@
+{
+  "name": "@sl/shared",
+  "private": true,
+  "type": "module",
+  "description": "Kode bersama Sekolah Lestari: komponen UI, tema, api/auth/i18n, halaman fitur, konfigurasi Vite.",
+  "scripts": { "icons": "bun scripts/icons.ts" }
+}
