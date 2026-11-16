@@ -20,6 +20,7 @@ import { addDays, fmtDate, kg, num, groupByScope, pct, signedPct, SOURCES, sourc
 import { cn } from "@/lib/utils"
 import { t as tr, tl, tServer } from "@/lib/i18n"
 import { Delta, hatch, PillBars, SegmentGauge, SRC_ICON, StatTile } from "@/components/dash-kit"
+import { ScopeHeading } from "@/components/scope-group"
 
 const RANGES = [{ v: "7", l: tl("7H", "7D") }, { v: "30", l: tl("30H", "30D") }, { v: "90", l: tl("90H", "90D") }, { v: "365", l: tl("1T", "1Y") }]
 /** Kartu gelap "langsung": jam WIB & hitung mundur pembaruan otomatis. */
@@ -120,17 +121,32 @@ export default function Dashboard() {
   const task = d.tasks[0]
   const barTotal = bars.reduce((s, b) => s + b.value, 0)
 
+  // ---- angka utama yang mudah dibaca ----
+  const todayKg = d.today?.total ?? 0
+  const frac = d.today?.fraction ?? null
+  const yKg = d.yesterday?.total ?? null
+  const env = {
+    absorbedToday: d.trees.absorbedToday ?? 0, absorbedMonth: d.trees.absorbedMonth ?? 0,
+    stock: d.trees.stock ?? 0, count: d.trees.count ?? 0,
+    avoided: d.avoided?.totalCo2e ?? 0,
+  }
+  const envMonth = env.absorbedMonth + env.avoided
+  const envShare = d.month.total > 0 ? envMonth / d.month.total : 0
+  const updated = new Date(dataUpdatedAt).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }).replace(".", ":")
+  const monthSources = groupByScope(Object.entries<any>(d.month.bySource).map(([k, v]) => ({ k, kg: v.kg as number })).filter((x) => x.kg > 0), (x) => x.k, orgInfo)
+  const maxSrc = Math.max(...monthSources.flatMap((g) => g.items.map((x) => x.kg)), 1)
+
   return (
     <div className="space-y-5">
       {/* ---------- judul ---------- */}
-      <div className="flex flex-col gap-5 pb-2 lg:flex-row lg:items-end lg:justify-between">
+      <div className="flex flex-col gap-4 pb-1 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 className="text-4xl font-semibold tracking-tight sm:text-[2.75rem]">{tl("Dasbor", "Dashboard")}</h1>
-          <p className="mt-2 text-[0.9375rem] text-muted-foreground">{tl("Pantau, telusuri, dan kurangi emisi sekolah setiap hari.", "Monitor, trace and reduce your school's emissions every day.")} · {fmtDate(d.date, { weekday: "long", day: "numeric", month: "long" })}</p>
+          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{tl("Dasbor", "Dashboard")}</h1>
+          <p className="mt-1.5 text-[0.9375rem] text-muted-foreground">{d.org.name} · {fmtDate(d.date, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
         </div>
-        <div className="flex flex-wrap gap-3">
-          {canInput && <Button size="lg" className="h-12 px-6 text-[0.9375rem]" render={<Link to="/app/input" />}><Plus /> {tl("Input data", "Add data")}</Button>}
-          <Button size="lg" variant="outline" className="h-12 border-primary px-6 text-[0.9375rem] text-primary hover:text-primary" render={<Link to="/app/trace" />}><Sigma /> {tr("Telusuri angka")}</Button>
+        <div className="flex flex-wrap gap-2.5">
+          {canInput && <Button size="lg" className="h-11 px-5" render={<Link to="/app/input" />}><Plus /> {tl("Input data", "Add data")}</Button>}
+          <Button size="lg" variant="outline" className="h-11 border-primary px-5 text-primary hover:text-primary" render={<Link to="/app/trace" />}><Sigma /> {tr("Telusuri angka")}</Button>
         </div>
       </div>
 
@@ -147,132 +163,165 @@ export default function Dashboard() {
         </Alert>
       )}
 
-      {/* ---------- KPI ---------- */}
-      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile featured title={tl("Emisi kemarin", "Emissions yesterday")} unit="kg CO₂e" onClick={() => d.yesterday && nav(`/app/trace?date=${d.yesterday.date}`)}
-          value={<CountUp value={d.yesterday?.total ?? 0} format={(v) => num(v, 0)} />}
-          foot={<div className="space-y-1.5">
-            {delta !== null ? <Delta invert value={signedPct(delta)} good={delta <= 0} text={tl("vs hari sebelumnya", "vs the day before")} /> : <span className="text-[0.8125rem] text-white/80">{d.yesterday ? tr("hari " + d.yesterday.dayType) : tl("Belum ada data kemarin", "No data for yesterday")}</span>}
-            <div className="text-[0.75rem] text-white/75">{tl(`Final · tutup buku 00.30 WIB · hari ini sementara ${num(d.today?.total ?? 0, 0)} kg`, `Final · closed at 00:30 WIB · today so far ${num(d.today?.total ?? 0, 0)} kg`)}</div>
-          </div>} />
-        <StatTile title={tl("Emisi bulan ini · s.d. kemarin", "This month · through yesterday")} unit="t CO₂e" onClick={() => nav("/app/carbon")}
-          value={<CountUp value={d.month.total / 1000} format={(v) => num(v, 2)} />}
-          foot={<span className="text-[0.8125rem] text-primary">{tr("{a} hari aktif · data kuat {b}", { a: d.month.activeDays, b: pct(d.month.strongShare) })}</span>} />
-        <StatTile title={tl("Intensitas per orang", "Intensity per person")} unit={tl("kg/hari aktif", "kg/active day")} onClick={() => nav("/app/carbon")}
-          value={<CountUp value={d.intensity.current} format={(v) => num(v, 3)} />}
-          foot={d.intensity.change !== null ? <Delta value={signedPct(d.intensity.change)} good={intensityDown} text={tl("dibanding baseline", "vs baseline")} /> : <span className="text-[0.8125rem] text-muted-foreground">{tr("Belum ada baseline")}</span>} />
-        <StatTile title={tr("Stok karbon pohon")} unit="t CO₂" onClick={() => nav("/app/eco-services")}
-          value={<CountUp value={d.trees.stock / 1000} format={(v) => num(v, 2)} />}
-          foot={<Delta value={`+${num(d.trees.absorbedYesterday ?? 0, 1)}`} good text={tl(`kg CO₂ diserap kemarin · ${num(d.trees.absorbedMonth, 0)} kg bulan ini`, `kg CO₂ absorbed yesterday · ${num(d.trees.absorbedMonth, 0)} kg this month`)} />} />
+      {/* ---------- 1. HARI INI + LINGKUNGAN ---------- */}
+      <div className="grid gap-5 lg:grid-cols-2">
+        {/* emisi hari ini */}
+        <section className="relative overflow-hidden rounded-[1.75rem] bg-primary-deep p-6 text-white sm:p-7">
+          <div className="pointer-events-none absolute inset-0 opacity-50" style={{ backgroundImage: "repeating-radial-gradient(circle at 110% 120%, transparent 0 14px, rgb(255 255 255 / 0.05) 14px 16px)" }} />
+          <div className="relative">
+            <div className="flex items-center justify-between gap-3">
+              <span className="inline-flex items-center gap-2 text-sm font-medium text-white/85"><Flame className="size-4" />{tl("Emisi hari ini", "Emissions today")}</span>
+              <button onClick={() => refetch()} className="inline-flex items-center gap-1.5 rounded-full bg-white/12 px-3 py-1 text-xs text-white/85 transition-colors hover:bg-white/20" title={tl("Perbarui", "Refresh")}>
+                {isFetching ? <Pause className="size-3.5" /> : <RefreshCw className="size-3.5" />}{tl(`diperbarui ${updated} WIB`, `updated ${updated} WIB`)}
+              </button>
+            </div>
+            <button onClick={() => setTrace({ date: d.date })} className="mt-3 block text-left">
+              <span className="text-[3.25rem] leading-none font-semibold tracking-tight tabular sm:text-[3.75rem]"><CountUp value={todayKg} format={(v) => num(v, 0)} /></span>
+              <span className="ml-2 text-lg text-white/75">kg CO₂e</span>
+            </button>
+            <p className="mt-2 text-sm text-white/75">{tl("Sementara — terus bertambah sampai tutup buku 00.30 WIB", "Provisional — keeps growing until the 00:30 WIB close")}</p>
+            {frac !== null && (
+              <div className="mt-4">
+                <div className="flex justify-between text-[0.6875rem] text-white/65"><span>00.00</span><span>{tl(`${pct(frac, 0)} hari berjalan`, `${pct(frac, 0)} of the day`)}</span><span>24.00</span></div>
+                <div className="mt-1 h-2 overflow-hidden rounded-full bg-white/15"><div className="h-full rounded-full bg-emerald-300 transition-all duration-700" style={{ width: `${frac * 100}%` }} /></div>
+              </div>
+            )}
+            <div className="mt-5 grid grid-cols-3 gap-2">
+              {([1, 2, 3] as const).map((sc) => (
+                <div key={sc} className="rounded-2xl bg-white/10 px-3 py-2.5">
+                  <div className="text-[0.6875rem] text-white/65">{tl(["", "Scope 1 · langsung", "Scope 2 · listrik", "Scope 3 · lainnya"][sc], ["", "Scope 1 · direct", "Scope 2 · power", "Scope 3 · other"][sc])}</div>
+                  <div className="mt-0.5 font-semibold tabular">{num(d.today?.scope?.[sc] ?? 0, 0)} <span className="text-xs font-normal text-white/65">kg</span></div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1.5 border-t border-white/12 pt-4 text-sm">
+              <span className="text-white/75">{tl("Kemarin (final)", "Yesterday (final)")} <b className="font-semibold text-white">{yKg === null ? "—" : `${num(yKg, 0)} kg`}</b>{d.yesterday && <span className="text-white/60"> · {tr("hari " + d.yesterday.dayType)}</span>}</span>
+              {todayKg > 0 && <span className="text-white/75">≈ <b className="font-semibold text-white">{num(todayKg / 0.082, 0)} km</b> {tl("naik motor", "by motorbike")}</span>}
+            </div>
+          </div>
+        </section>
+
+        {/* lingkungan */}
+        <section className="relative overflow-hidden rounded-[1.75rem] bg-gradient-to-br from-emerald-50 to-lime-50 p-6 ring-1 ring-emerald-600/15 sm:p-7 dark:from-emerald-950/40 dark:to-lime-950/20">
+          <Leaf className="pointer-events-none absolute -right-6 -bottom-8 size-44 text-emerald-600/10" strokeWidth={1.2} />
+          <div className="relative">
+            <div className="flex items-center justify-between gap-3">
+              <span className="inline-flex items-center gap-2 text-sm font-medium text-emerald-800 dark:text-emerald-200"><Leaf className="size-4" />{tl("Karbon dari lingkungan sekolah", "Carbon from the school environment")}</span>
+              <Link to="/app/eco-services" className="text-xs font-medium text-emerald-700 hover:underline dark:text-emerald-300">{tl("Detail →", "Details →")}</Link>
+            </div>
+            <div className="mt-3">
+              <span className="text-[3.25rem] leading-none font-semibold tracking-tight text-emerald-900 tabular sm:text-[3.75rem] dark:text-emerald-100"><CountUp value={envMonth} format={(v) => num(v, 0)} /></span>
+              <span className="ml-2 text-lg text-emerald-800/70 dark:text-emerald-200/70">kg CO₂e</span>
+            </div>
+            <p className="mt-2 text-sm text-emerald-900/70 dark:text-emerald-100/70">{tl("Diserap pohon + emisi yang dihindari bulan ini", "Absorbed by trees + emissions avoided this month")}</p>
+            <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {[
+                [Leaf, tl("Serapan pohon", "Tree uptake"), `${num(env.absorbedMonth, 1)} kg`, tl(`hari ini ${num(env.absorbedToday, 2)} kg`, `today ${num(env.absorbedToday, 2)} kg`)],
+                [Mountain, tl("Stok karbon pohon", "Tree carbon stock"), `${num(env.stock / 1000, 2)} t`, tl(`${num(env.count)} pohon terukur`, `${num(env.count)} trees measured`)],
+                [Recycle, tl("Emisi terhindar", "Avoided"), `${num(env.avoided, 0)} kg`, tl("kompos · bank sampah · PLTS", "compost · waste bank · solar")],
+              ].map(([I, l, v, sub]: any) => (
+                <div key={l} className="rounded-2xl bg-white/70 px-3 py-2.5 dark:bg-white/5">
+                  <div className="flex items-center gap-1.5 text-[0.6875rem] text-emerald-800/75 dark:text-emerald-200/75"><I className="size-3.5" />{l}</div>
+                  <div className="mt-0.5 font-semibold text-emerald-950 tabular dark:text-emerald-50">{v}</div>
+                  <div className="truncate text-[0.6875rem] text-emerald-900/60 dark:text-emerald-100/60">{sub}</div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 border-t border-emerald-700/10 pt-4">
+              <div className="flex items-center justify-between text-sm text-emerald-900/80 dark:text-emerald-100/80">
+                <span>{tl("Dibanding emisi bulan ini", "Compared with this month's emissions")}</span><b className="tabular">{pct(envShare, 1)}</b>
+              </div>
+              <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-emerald-900/10"><div className="h-full rounded-full bg-emerald-500 transition-all duration-700" style={{ width: `${Math.min(envShare, 1) * 100}%` }} /></div>
+              <p className="mt-2 text-[0.6875rem] text-emerald-900/60 dark:text-emerald-100/60">{tl(`Biopori ${num(d.avoided?.biopori?.count ?? 0)} lubang menampung ${num(d.avoided?.biopori?.liters ?? 0, 0)} L air. Estimasi internal — bukan kredit karbon dan tidak mengurangi angka emisi (Perpres 110/2025).`, `${num(d.avoided?.biopori?.count ?? 0)} biopores hold ${num(d.avoided?.biopori?.liters ?? 0, 0)} L of water. Internal estimate — not a carbon credit and not subtracted from emissions.`)}</p>
+            </div>
+          </div>
+        </section>
       </div>
 
-      {/* ---------- grid utama ---------- */}
-      <div className="grid gap-5 xl:grid-cols-4">
-        <div className="space-y-5 xl:col-span-3">
-          <div className="grid gap-5 lg:grid-cols-3">
-            <Card className="lg:col-span-2">
-              <CardHeader>
-                <CardTitle className="text-xl">{tl("Analitik emisi", "Emission analytics")}</CardTitle>
-                <CardDescription>{barMode === "day" ? tl("7 hari terakhir", "Last 7 days") : tl("7 minggu terakhir", "Last 7 weeks")} · {ton(barTotal)} CO₂e · {tl("arsir = libur", "hatched = holiday")}</CardDescription>
-                <CardAction>
-                  <ToggleGroup value={[barMode]} onValueChange={(v) => v[0] && setBarMode(v[0] as any)} variant="outline" size="sm">
-                    <ToggleGroupItem value="day">{tl("Harian", "Daily")}</ToggleGroupItem>
-                    <ToggleGroupItem value="week">{tl("Mingguan", "Weekly")}</ToggleGroupItem>
-                  </ToggleGroup>
-                </CardAction>
-              </CardHeader>
-              <CardContent className="pt-6">{bars.length ? <PillBars bars={bars} onPick={(b) => setTrace({ date: b.date })} /> : <Skeleton className="h-60 rounded-2xl" />}</CardContent>
-            </Card>
+      {/* ---------- 2. ringkasan cepat ---------- */}
+      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+        <StatTile title={tl("Emisi bulan ini", "This month")} unit="t CO₂e" onClick={() => nav("/app/carbon")}
+          value={<CountUp value={d.month.total / 1000} format={(v) => num(v, 2)} />}
+          foot={<span className="text-[0.8125rem] text-muted-foreground">{tr("{a} hari aktif · data kuat {b}", { a: d.month.activeDays, b: pct(d.month.strongShare) })} · {tl("s.d. kemarin", "through yesterday")}</span>} />
+        <StatTile title={tl("Per orang per hari sekolah", "Per person per school day")} unit="kg CO₂e" onClick={() => nav("/app/carbon")}
+          value={<CountUp value={d.intensity.current} format={(v) => num(v, 3)} />}
+          foot={d.intensity.change !== null ? <Delta value={signedPct(d.intensity.change)} good={intensityDown} text={tl("dibanding baseline", "vs baseline")} /> : <span className="text-[0.8125rem] text-muted-foreground">{tr("Belum ada baseline")}</span>} />
+        <StatTile title={tl("Kualitas data", "Data quality")} unit={tl("data kuat", "strong data")} onClick={() => nav("/app/carbon")}
+          value={<CountUp value={quality.strong * 100} format={(v) => num(v, 0) + "%"} />}
+          foot={<span className="text-[0.8125rem] text-muted-foreground">{tl(`proyeksi ${pct(quality.proj)} · sisanya input/estimasi`, `projected ${pct(quality.proj)} · rest input/estimate`)}</span>} />
+        <StatTile title={tl("Tugas berikutnya", "Next task")} unit="" onClick={() => task && nav(task.link)}
+          value={<span className="line-clamp-2 text-xl leading-tight">{task ? tServer(task.title) : tl("Semua beres", "All done")}</span>}
+          foot={<span className={cn("text-[0.8125rem]", task?.status === "terlambat" ? "text-destructive" : "text-muted-foreground")}>{task ? `${task.status === "terlambat" ? tl("Terlambat · ", "Overdue · ") : ""}${tl("tenggat", "due")} ${fmtDate(task.due)}${d.tasks.length > 1 ? ` · +${d.tasks.length - 1}` : ""}` : tl("Tidak ada tugas jatuh tempo", "Nothing due")}</span>} />
+      </div>
 
-            <Card>
-              <CardHeader><CardTitle className="text-xl">{tl("Pengingat", "Reminders")}</CardTitle></CardHeader>
-              <CardContent className="flex flex-1 flex-col">
-                {task ? (
-                  <>
-                    <p className="text-2xl leading-tight font-semibold tracking-tight text-primary">{tServer(task.title)}</p>
-                    <p className={cn("mt-2 text-sm", task.status === "terlambat" ? "text-destructive" : "text-muted-foreground")}>{task.status === "terlambat" ? tr("Terlambat · ") : ""}{tr("tenggat")} {fmtDate(task.due)}</p>
-                    {task.detail && <p className="mt-1 text-sm text-muted-foreground">{tServer(task.detail)}</p>}
-                    {d.tasks.length > 1 && <p className="mt-3 text-xs text-muted-foreground">+{d.tasks.length - 1} {tl("tugas lain", "more tasks")}</p>}
-                    <Button className="mt-auto h-12 w-full text-[0.9375rem]" render={<Link to={task.link} />}><Sparkles /> {tl("Kerjakan sekarang", "Do it now")}</Button>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-2xl leading-tight font-semibold text-primary">{tr("Semua tugas beres. Mantap!")}</p>
-                    {canInput && <Button className="mt-auto h-12 w-full" render={<Link to="/app/input" />}><Plus /> {tl("Input data", "Add data")}</Button>}
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="grid gap-5 lg:grid-cols-5">
-            <Card className="lg:col-span-3">
-              <CardHeader>
-                <CardTitle className="text-xl">{tl("Sumber vs baseline", "Sources vs baseline")}</CardTitle>
-                <CardDescription>{tl("Per orang per hari aktif, 30 hari terakhir", "Per person per active day, last 30 days")}</CardDescription>
-                <CardAction><Button size="sm" variant="outline" className="border-primary text-primary hover:text-primary" render={<Link to="/app/carbon" />}><Plus /> {tl("Rapor", "Report")}</Button></CardAction>
-              </CardHeader>
-              <CardContent className="space-y-1">
-                {vsRows.map(([k, v]) => {
-                  const I = SRC_ICON[k] ?? Leaf, ch = v.change as number | null
-                  const flat = ch === null || Math.abs(ch) < 0.005
+      {/* ---------- 3. dari mana emisinya + tren ---------- */}
+      <div className="grid gap-5 xl:grid-cols-5">
+        <Card className="xl:col-span-3">
+          <CardHeader>
+            <CardTitle className="text-xl">{tl("Dari mana emisi bulan ini?", "Where do this month's emissions come from?")}</CardTitle>
+            <CardDescription>{tl("Dikelompokkan per scope · klik sumber untuk melihat cara hitungnya", "Grouped by scope · click a source to see how it is calculated")}</CardDescription>
+            {canInput && <CardAction><Button size="sm" variant="outline" className="border-primary text-primary hover:text-primary" render={<Link to="/app/input" />}><Plus /> {tl("Input", "Input")}</Button></CardAction>}
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {!monthSources.length && <p className="text-sm text-muted-foreground">{tl("Belum ada emisi tercatat bulan ini.", "No emissions recorded this month yet.")}</p>}
+            {monthSources.map((g) => (
+              <div key={g.scope} className="space-y-1.5">
+                <ScopeHeading compact scope={g.scope} totalKg={g.items.reduce((a, x) => a + x.kg, 0)} />
+                {g.items.map((x) => {
+                  const I = SRC_ICON[x.k] ?? Leaf
                   return (
-                    <button key={k} onClick={() => setTrace({ date: d.date, source: k })} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3.5 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-muted/60">
-                      <span className="flex size-11 shrink-0 items-center justify-center rounded-full" style={{ background: `color-mix(in srgb, ${SOURCES[k]?.color} 18%, transparent)`, color: SOURCES[k]?.color }}><I className="size-5" /></span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-medium">{SOURCES[k]?.label ?? k}</span>
-                        <span className="block truncate text-xs text-muted-foreground">{tl("Bulan ini", "This month")} <b className="font-semibold text-foreground">{ton(d.month.bySource[k].kg)}</b> · {num(v.current, 3)} {tl("kg/orang/hari", "kg/person/day")}</span>
-                      </span>
-                      <span className={cn("shrink-0 rounded-md border px-2 py-0.5 text-[0.6875rem] font-medium tabular",
-                        flat ? "border-border text-muted-foreground" : ch! < 0 ? "border-primary/30 bg-primary/8 text-primary" : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400")}>
-                        {flat ? tl("Stabil", "Stable") : ch! < 0 ? tl(`Turun ${pct(-ch!, 0)}`, `Down ${pct(-ch!, 0)}`) : tl(`Naik ${pct(ch!, 0)}`, `Up ${pct(ch!, 0)}`)}
-                      </span>
+                    <button key={x.k} onClick={() => setTrace({ date: d.date, source: x.k })} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-muted/60">
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-full" style={{ background: `color-mix(in srgb, ${SOURCES[x.k]?.color} 18%, transparent)`, color: SOURCES[x.k]?.color }}><I className="size-4" /></span>
+                      <span className="w-40 shrink-0 truncate text-sm font-medium sm:w-52">{SOURCES[x.k]?.label ?? x.k}</span>
+                      <span className="h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full" style={{ width: `${(x.kg / maxSrc) * 100}%`, background: SOURCES[x.k]?.color }} /></span>
+                      <span className="w-24 shrink-0 text-right text-sm font-semibold tabular">{x.kg >= 1000 ? `${num(x.kg / 1000, 2)} t` : `${num(x.kg, 0)} kg`}</span>
+                      <span className="hidden w-12 shrink-0 text-right text-xs text-muted-foreground sm:inline">{pct(d.month.total ? x.kg / d.month.total : 0, 0)}</span>
                     </button>
                   )
                 })}
-              </CardContent>
-            </Card>
-
-            <Card className="lg:col-span-2">
-              <CardHeader><CardTitle className="text-xl">{tl("Kualitas data", "Data quality")}</CardTitle><CardDescription>{tl("Bulan ini, berdasarkan kg CO₂e", "This month, by kg CO₂e")}</CardDescription></CardHeader>
-              <CardContent className="flex flex-1 flex-col justify-between gap-4">
-                <SegmentGauge value={pct(quality.strong)} label={tl("Data kuat", "Strong data")}
-                  parts={[{ v: quality.strong, color: "var(--primary)" }, { v: quality.mid, color: "var(--primary-deep)" }, { v: quality.proj, color: "", hatched: true }]} />
-                <div className="flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm">
-                  <span className="flex items-center gap-2"><span className="size-3.5 rounded-full bg-primary" />{tl("Kuat", "Strong")}</span>
-                  <span className="flex items-center gap-2"><span className="size-3.5 rounded-full bg-primary-deep" />{tl("Input/estimasi", "Input/estimate")}</span>
-                  <span className="flex items-center gap-2"><span className="size-3.5 rounded-full ring-1 ring-primary/30" style={hatch()} />{tl("Proyeksi", "Projected")} {pct(quality.proj)}</span>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-
-        {/* kolom kanan */}
-        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1 xl:content-start">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-xl whitespace-nowrap">{tl("Sumber emisi", "Sources")}</CardTitle>
-              {canInput && <CardAction><Button size="icon-sm" variant="outline" className="border-primary text-primary hover:text-primary" aria-label={tl("Input data", "Add data")} render={<Link to="/app/input" />}><Plus /></Button></CardAction>}
-            </CardHeader>
-            <CardContent className="space-y-0.5">
-              {sources.slice(0, 6).map((s) => {
-                const I = SRC_ICON[s.k] ?? Leaf
-                return (
-                  <button key={s.k} onClick={() => setTrace({ date: d.date, source: s.k })} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3.5 rounded-xl px-2 py-2 text-left transition-colors hover:bg-muted/60">
-                    <I className="size-6 shrink-0" style={{ color: SOURCES[s.k]?.color }} strokeWidth={2.2} />
-                    <span className="min-w-0">
-                      <span className="block truncate font-medium">{SOURCES[s.k]?.label ?? s.k}</span>
-                      <span className="block text-xs text-muted-foreground tabular">{ton(s.kg)} · {pct(d.month.total ? s.kg / d.month.total : 0, 1)}</span>
-                    </span>
-                  </button>
-                )
-              })}
-            </CardContent>
-          </Card>
-          <LiveCard updatedAt={dataUpdatedAt} fetching={isFetching} onRefresh={() => refetch()} onTrace={() => nav("/app/trace")} />
-        </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+        <Card className="xl:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-xl">{tl("Tren emisi", "Emission trend")}</CardTitle>
+            <CardDescription>{barMode === "day" ? tl("7 hari terakhir", "Last 7 days") : tl("7 minggu terakhir", "Last 7 weeks")} · {ton(barTotal)} CO₂e · {tl("arsir = libur / berjalan", "hatched = holiday / in progress")}</CardDescription>
+            <CardAction>
+              <ToggleGroup value={[barMode]} onValueChange={(v) => v[0] && setBarMode(v[0] as any)} variant="outline" size="sm">
+                <ToggleGroupItem value="day">{tl("Harian", "Daily")}</ToggleGroupItem>
+                <ToggleGroupItem value="week">{tl("Mingguan", "Weekly")}</ToggleGroupItem>
+              </ToggleGroup>
+            </CardAction>
+          </CardHeader>
+          <CardContent className="pt-4">{bars.length ? <PillBars bars={bars} onPick={(b) => setTrace({ date: b.date })} /> : <Skeleton className="h-60 rounded-2xl" />}</CardContent>
+        </Card>
       </div>
+
+      {/* ---------- 4. dibanding baseline ---------- */}
+      {vsRows.length > 0 && d.baseline && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">{tl("Dibanding baseline", "Compared with the baseline")}</CardTitle>
+            <CardDescription>{tl("Per orang per hari sekolah, 30 hari terakhir · hijau = turun (lebih baik)", "Per person per school day, last 30 days · green = lower (better)")}</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-x-6 gap-y-1 md:grid-cols-2">
+            {vsRows.map(([k, v]) => {
+              const I = SRC_ICON[k] ?? Leaf, ch = v.change as number | null
+              const flat = ch === null || Math.abs(ch) < 0.005
+              return (
+                <button key={k} onClick={() => setTrace({ date: d.date, source: k })} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-muted/60">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full" style={{ background: `color-mix(in srgb, ${SOURCES[k]?.color} 18%, transparent)`, color: SOURCES[k]?.color }}><I className="size-4" /></span>
+                  <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{SOURCES[k]?.label ?? k}</span><span className="block truncate text-xs text-muted-foreground">{num(v.current, 3)} {tl("vs", "vs")} {num(v.baseline, 3)} {tl("kg/orang/hari", "kg/person/day")}</span></span>
+                  <span className={cn("shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold tabular", flat ? "bg-muted text-muted-foreground" : ch! < 0 ? "bg-primary/10 text-primary" : "bg-amber-500/12 text-amber-700 dark:text-amber-400")}>
+                    {flat ? tl("Stabil", "Stable") : ch! < 0 ? `↓ ${pct(-ch!, 0)}` : `↑ ${pct(ch!, 0)}`}
+                  </span>
+                </button>
+              )
+            })}
+          </CardContent>
+        </Card>
+      )}
 
       <h2 className="pt-6 text-xl font-semibold tracking-tight">{tl("Analisis lanjutan", "Deeper analysis")}</h2>
       {/* ---------- penjelajah emisi + komposisi ---------- */}
