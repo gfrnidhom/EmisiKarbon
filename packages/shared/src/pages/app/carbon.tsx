@@ -124,11 +124,15 @@ export default function Carbon() {
               {g.items.map(([k, v]) => {
                 const I = SRC_ICON[k] ?? Zap
                 const lbl = Object.entries<number>(cur.srcLabels?.[k] ?? {}).sort((a, b) => b[1] - a[1])[0]?.[0]
+                const isIot = k === "listrik" && (lbl === "terukur" || cur.srcLabels?.[k]?.terukur)
                 return (
                   <Link key={k} to={`/app/trace?date=${traceDate(cur)}&source=${k}`} className="group -mx-2 flex w-[calc(100%+1rem)] items-center gap-3.5 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-muted/60">
                     <span className="flex size-11 shrink-0 items-center justify-center rounded-full" style={{ background: `color-mix(in srgb, ${SOURCES[k]?.color} 18%, transparent)`, color: SOURCES[k]?.color }}><I className="size-5" /></span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium">{SOURCES[k]?.label ?? k}</span>
+                      <span className="flex items-center gap-2 truncate font-medium">
+                        <span>{SOURCES[k]?.label ?? k}</span>
+                        {isIot && <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.2 text-[0.6875rem] font-semibold text-emerald-700 ring-1 ring-emerald-500/25 dark:text-emerald-300">⚡ Terukur IoT</span>}
+                      </span>
                       <span className="block truncate text-xs text-muted-foreground">Scope {sourceScope(k, org)} · <b className="font-semibold text-foreground">{kg(v, 0)}</b> · {pct(v / cur.total, 1)}</span>
                     </span>
                     <QualityBadge label={lbl} />
@@ -145,9 +149,16 @@ export default function Carbon() {
             <CardContent className="space-y-5">
               {([1, 2, 3] as const).map((sc) => {
                 const share = cur.total ? cur.scope[sc] / cur.total : 0
+                const isIotScope2 = sc === 2 && (cur.srcLabels?.listrik?.terukur != null)
                 return (
                   <div key={sc}>
-                    <div className="mb-2 flex items-baseline justify-between text-sm"><span className="font-medium">Scope {sc}</span><span className="tabular"><b>{ton(cur.scope[sc])}</b> <span className="text-muted-foreground">· {pct(share, 1)}</span></span></div>
+                    <div className="mb-2 flex items-baseline justify-between text-sm">
+                      <span className="font-medium flex items-center gap-2">
+                        Scope {sc}
+                        {isIotScope2 && <span className="rounded-full bg-emerald-500/15 px-2 py-0.2 text-[0.6875rem] font-medium text-emerald-700 ring-1 ring-emerald-500/25 dark:text-emerald-300">⚡ IoT Smart Meter</span>}
+                      </span>
+                      <span className="tabular"><b>{ton(cur.scope[sc])}</b> <span className="text-muted-foreground">· {pct(share, 1)}</span></span>
+                    </div>
                     <div className="h-9 overflow-hidden rounded-full bg-muted" style={hatch("var(--muted-foreground)")}>
                       <div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.max(share * 100, 4)}%`, background: `var(--scope${sc})` }} />
                     </div>

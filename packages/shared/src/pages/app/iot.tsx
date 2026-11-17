@@ -85,11 +85,14 @@ export default function Iot() {
   const perm = usePerm()
   const [editD, setEditD] = useState<any>(null)
   const [pairOpen, setPairOpen] = useState(false)
+  const [simOpen, setSimOpen] = useState(false)
+  const [simVal, setSimVal] = useState("")
+  const [simDelta, setSimDelta] = useState<number | null>(5)
   const [nf, setNf] = useState({ name: "", category: "", location: "", interval_sec: "300" })
   const cats = useQuery({ queryKey: ["iot-categories", orgId], queryFn: () => api<any[]>(`/orgs/${orgId}/iot/categories`), enabled: !!orgId })
   const chosen = cats.data?.find((c) => c.key === nf.category)
   const [period, setPeriod] = useState(monthAdd(todayWIB().slice(0, 7), -1))
-  const refresh = () => { qc.invalidateQueries({ queryKey: ["iot"] }); qc.invalidateQueries({ queryKey: ["iot-beats"] }) }
+  const refresh = () => { qc.invalidateQueries({ queryKey: ["iot"] }); qc.invalidateQueries({ queryKey: ["iot-beats"] }); qc.invalidateQueries({ queryKey: ["iot-readings"] }) }
   const create = useMutation({
     mutationFn: () => api<any>(`/orgs/${orgId}/iot`, { method: "POST", json: { ...nf, interval_sec: Number(nf.interval_sec) } }),
     onSuccess: (r) => { toast.success(tl("Perangkat terdaftar — lanjutkan pairing dengan QR", "Device registered — continue pairing with the QR")); setAdd(false); setSel(r.id); refresh(); setPairOpen(true) },
@@ -107,6 +110,19 @@ export default function Iot() {
       const j = await r.json(); if (!r.ok) throw new Error(j.error ?? r.statusText); return j
     },
     onSuccess: () => { toast.success(tl("Heartbeat uji diterima server", "Test heartbeat received")); refresh() },
+    onError: (e: Error) => toast.error(e.message),
+  })
+  // Kirim data pembacaan uji langsung dari UI
+  const sendTestReading = useMutation({
+    mutationFn: (b: any) => api(`/iot/${device.id}/test-reading`, { method: "POST", json: b }),
+    onSuccess: () => {
+      toast.success(tl("Pembacaan uji berhasil dikirim! Scope 2 dan Dasbor diperbarui.", "Test reading sent! Scope 2 and Dashboard updated."))
+      setSimOpen(false)
+      refresh()
+      qc.invalidateQueries({ queryKey: ["monthly"] })
+      qc.invalidateQueries({ queryKey: ["dashboard"] })
+      qc.invalidateQueries({ queryKey: ["trace-page"] })
+    },
     onError: (e: Error) => toast.error(e.message),
   })
 
@@ -139,6 +155,10 @@ export default function Iot() {
                   <ConnectionPill status={d.connection} />
                   <span className="text-xs text-muted-foreground">{ago(d.lastSeenAgeSec)}</span>
                 </div>
+                <div className="mt-2.5 flex items-center justify-between border-t border-border/40 pt-2 text-xs">
+                  <span className="text-muted-foreground">{tl("Hari ini:", "Today:")} <b className="font-semibold text-foreground tabular">{num(d.periods?.today?.value ?? d.todayUsage ?? 0, 1)} {d.unit}</b></span>
+                  <span className="text-muted-foreground">{tl("Bulan ini:", "Month:")} <b className="font-semibold text-foreground tabular">{num(d.periods?.thisMonth?.value ?? d.monthToDate ?? 0, 1)} {d.unit}</b></span>
+                </div>
               </button>
             ))}
           </div>
@@ -150,8 +170,9 @@ export default function Iot() {
                 <CardDescription className="flex flex-wrap items-center gap-2">{device.carbon?.label} · {device.unit} · {device.location ?? "-"}<span className={cn("rounded-full px-2.5 py-0.5 text-[0.6875rem] font-medium", EFFECT[device.carbon?.effect]?.cls)}>{tl(EFFECT[device.carbon?.effect]?.id ?? "", EFFECT[device.carbon?.effect]?.en ?? "")}</span></CardDescription>
                 {can("operator", "admin") && (
                   <CardAction className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" onClick={() => { setSimDelta(5); setSimVal(""); setSimOpen(true) }} disabled={device.status !== "aktif"}><Zap /> {tl("Kirim data uji", "Test reading")}</Button>
                     <Button size="sm" onClick={() => setPairOpen(true)} disabled={device.status !== "aktif"}><QrCode /> {device.paired_at ? tl("QR koneksi", "Connection QR") : tl("Hubungkan perangkat", "Pair device")}</Button>
-                    <Button size="sm" variant="outline" onClick={() => testPing.mutate()} disabled={testPing.isPending || device.status !== "aktif"}>{testPing.isPending ? <Spinner /> : <Send />} {tl("Uji koneksi", "Test")}</Button>
+                    <Button size="sm" variant="outline" onClick={() => testPing.mutate()} disabled={testPing.isPending || device.status !== "aktif"}>{testPing.isPending ? <Spinner /> : <Send />} {tl("Uji koneksi", "Ping")}</Button>
                     <Button size="sm" variant="ghost" onClick={() => patch.mutate({ status: device.status === "aktif" ? "nonaktif" : "aktif" })}><Power /> {device.status === "aktif" ? t("Nonaktifkan") : t("Aktifkan")}</Button>
                     {perm.manage && <RowActions onEdit={() => setEditD(device)} del={{ path: `/iot/${device.uuid ?? device.id}`, title: tl(`Hapus perangkat "${device.name}"?`, `Delete device "${device.name}"?`), description: tl("Perangkat beserta seluruh bacaan & riwayat koneksinya dihapus permanen. Bila bacaan sudah dipakai menghitung bulan yang tutup buku, penghapusan ditolak — nonaktifkan saja.", "The device and all its readings are removed permanently. If readings were used for closed months, deletion is refused — deactivate instead."), invalidate: [["iot"]], onDone: () => setSel(null) }} />}
                   </CardAction>
@@ -168,17 +189,103 @@ export default function Iot() {
                     [tl("Alamat IP", "IP address"), <span className="font-mono text-xs">{device.last_ip ?? "–"}</span>],
                   ].map(([k, v], i) => <div key={i}><dt className="text-xs text-muted-foreground">{k}</dt><dd className="mt-1 font-medium">{v}</dd></div>)}
                 </dl>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-2xl bg-muted/50 p-4"><div className="text-xs text-muted-foreground">{tl("Terbaca bulan ini", "Read this month")}</div><div className="mt-1 text-2xl font-semibold tabular">{num(device.monthToDate ?? 0, 1)} <span className="text-sm font-normal text-muted-foreground">{device.unit}</span></div></div>
-                  <div className={cn("rounded-2xl p-4", device.carbon?.effect === "emisi" ? "bg-primary text-primary-foreground" : device.carbon?.effect === "terhindar" ? "bg-amber-500/15" : "bg-muted/50")}>
-                    <div className={cn("text-xs", device.carbon?.effect === "emisi" ? "opacity-80" : "text-muted-foreground")}>{device.carbon?.effect === "terhindar" ? tl("Emisi terhindar bulan ini", "Avoided this month") : tl("Karbon bulan ini", "Carbon this month")}</div>
-                    <div className="mt-1 text-2xl font-semibold tabular">{device.carbon?.kgMonth != null ? <>{num(device.carbon.kgMonth, 1)} <span className="text-sm font-normal opacity-80">kg CO₂e</span></> : <span className="text-base font-medium">{tl("Tidak dihitung", "Not counted")}</span>}</div>
+
+                {/* Integrasi Scope 2 (Listrik PLN) jika kategori listrik */}
+                {(device.category === "listrik_pln" || device.source === "listrik") && (
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3.5 rounded-2xl border border-primary/30 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent p-4">
+                    <div className="flex items-center gap-3">
+                      <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+                        <Zap className="size-5" />
+                      </span>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-foreground">{tl("Terintegrasi ke Scope 2 · Listrik PLN", "Integrated into Scope 2 · Grid Electricity")}</span>
+                          <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-500/25 dark:text-emerald-300">
+                            {tl("Terbaca Otomatis", "Auto Read")}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {tl("Data pembacaan kWh sensor ini otomatis terbaca di Dasbor, Rapor Karbon, dan Telusuri Angka sebagai data aktual terukur Scope 2.", "kWh readings from this sensor automatically feed into Dashboard, Carbon Report, and Trace Numbers as measured Scope 2 data.")}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button size="sm" variant="outline" render={<Link to="/app/carbon" />}>
+                        {tl("Rapor Karbon", "Carbon Report")} <ArrowUpRight className="ml-1 size-3.5" />
+                      </Button>
+                      <Button size="sm" variant="outline" render={<Link to="/app/trace?source=listrik" />}>
+                        {tl("Telusuri Angka", "Trace Numbers")} <ArrowUpRight className="ml-1 size-3.5" />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="rounded-2xl bg-muted/50 p-4"><div className="text-xs text-muted-foreground">{tl("Faktor emisi", "Emission factor")}</div>
-                    {device.carbon?.factor ? <><div className="mt-1 font-semibold tabular">{num(device.carbon.factor.value, 3)} <span className="text-xs font-normal text-muted-foreground">{device.carbon.factor.unit}</span></div><div className="text-xs text-muted-foreground">{FACTOR_PLAIN[device.carbon.category]?.() ?? ""}{device.carbon.factor.fossilShare ? tl(` · porsi fosil ${num(device.carbon.factor.fossilShare * 100, 0)}%`, ` · fossil share ${num(device.carbon.factor.fossilShare * 100, 0)}%`) : ""}</div>
-                      <Link to="/factors" className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">{tl("Lihat rincian", "See details")} <ArrowUpRight className="size-3" /></Link></> : <div className="mt-1 text-sm text-muted-foreground">{tl("Tidak ada — sensor pemantauan", "None — monitoring sensor")}</div>}
+                )}
+
+                {/* Metrik Pembacaan: Hari ini, Minggu ini, Bulan ini, Faktor Emisi */}
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{tl("Hari ini", "Today")}</span>
+                      <span className="font-medium text-primary">00.00 – {tl("kini", "now")}</span>
+                    </div>
+                    <div className="mt-1.5 text-2xl font-bold tracking-tight tabular text-foreground">
+                      {num(device.periods?.today?.value ?? device.todayUsage ?? 0, 1)}{" "}
+                      <span className="text-sm font-normal text-muted-foreground">{device.unit}</span>
+                    </div>
+                    <div className="mt-1 flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                      <Zap className="size-3.5" />
+                      <span>{device.periods?.today?.kg != null ? `${num(device.periods.today.kg, 1)} kg CO₂e` : tl("Pemantauan", "Monitoring")}</span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl bg-muted/50 p-4">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{tl("Minggu ini", "This week")}</span>
+                      <span>{tl("Senin – kini", "Mon – now")}</span>
+                    </div>
+                    <div className="mt-1.5 text-2xl font-bold tracking-tight tabular text-foreground">
+                      {num(device.periods?.thisWeek?.value ?? device.weekUsage ?? 0, 1)}{" "}
+                      <span className="text-sm font-normal text-muted-foreground">{device.unit}</span>
+                    </div>
+                    <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <span>{device.periods?.thisWeek?.kg != null ? `≈ ${num(device.periods.thisWeek.kg, 1)} kg CO₂e` : "–"}</span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl bg-muted/50 p-4">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{tl("Bulan ini", "This month")}</span>
+                      <span>{tl("Tgl 1 – kini", "1st – now")}</span>
+                    </div>
+                    <div className="mt-1.5 text-2xl font-bold tracking-tight tabular text-foreground">
+                      {num(device.periods?.thisMonth?.value ?? device.monthToDate ?? 0, 1)}{" "}
+                      <span className="text-sm font-normal text-muted-foreground">{device.unit}</span>
+                    </div>
+                    <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <span>{device.periods?.thisMonth?.kg != null ? `≈ ${num(device.periods.thisMonth.kg, 1)} kg CO₂e` : "–"}</span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl bg-muted/50 p-4">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{tl("Faktor emisi", "Factor")}</span>
+                      {device.carbon?.scope && <span className="rounded-full bg-primary/10 px-2 py-0.2 text-[0.6875rem] font-semibold text-primary">Scope {device.carbon.scope}</span>}
+                    </div>
+                    {device.carbon?.factor ? (
+                      <>
+                        <div className="mt-1.5 text-2xl font-bold tracking-tight tabular text-foreground">
+                          {num(device.carbon.factor.value, 3)}{" "}
+                          <span className="text-xs font-normal text-muted-foreground">{device.carbon.factor.unit}</span>
+                        </div>
+                        <div className="mt-1 truncate text-xs text-muted-foreground">
+                          {FACTOR_PLAIN[device.carbon.category]?.() ?? ""}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="mt-2 text-sm text-muted-foreground">{tl("Tidak ada — pemantauan", "None — monitoring")}</div>
+                    )}
                   </div>
                 </div>
+
                 <div>
                   <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground"><span>{tl("Aktivitas 24 jam terakhir", "Activity, last 24 hours")}</span><span>{tl("sekarang", "now")}</span></div>
                   <div className="flex h-8 items-stretch gap-1">
@@ -232,6 +339,44 @@ export default function Iot() {
         fields={[{ key: "name", label: tl("Nama perangkat", "Device name") }, { key: "location", label: tl("Lokasi", "Location") }, { key: "interval_sec", label: tl("Interval kirim (detik)", "Send interval (s)"), type: "number" }]}
         initial={{ name: editD.name, location: editD.location ?? "", interval_sec: editD.interval_sec ?? 300 }} save={(v) => api(`/iot/${editD.uuid ?? editD.id}`, { method: "PATCH", json: v })} invalidate={[["iot"]]} />}
       {device && <PairDialog open={pairOpen} onOpenChange={setPairOpen} device={device} lan={data.lan ?? []} canRotate={can("operator", "admin")} onRotate={() => patch.mutate({ rotate: true })} />}
+
+      {/* Dialog Kirim Data Uji / Simulasi Pembacaan */}
+      {device && (
+        <Dialog open={simOpen} onOpenChange={setSimOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><Zap className="size-5 text-primary" /> {tl("Kirim Data Uji Sensor", "Send Test Sensor Reading")}</DialogTitle>
+              <DialogDescription>{tl(`Simulasikan pengiriman data pembacaan meter kumulatif untuk "${device.name}". Data akan langsung tersimpan dan dihitung ke Scope 2.`, `Simulate cumulative meter reading transmission for "${device.name}". Data is stored immediately and calculated into Scope 2.`)}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="rounded-xl bg-muted/60 p-3 text-sm flex items-center justify-between">
+                <span className="text-muted-foreground">{tl("Pembacaan terakhir:", "Latest reading:")}</span>
+                <span className="font-semibold font-mono text-base">{device.last ? num(device.last.value, 1) : 0} {device.unit}</span>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1.5">{tl("Tambah pemakaian cepat (+ delta):", "Quick increment (+ delta):")}</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[1, 5, 10, 25].map((d) => (
+                    <Button key={d} type="button" size="sm" variant={simDelta === d ? "default" : "outline"} onClick={() => { setSimDelta(d); setSimVal("") }}>
+                      +{d} {device.unit}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-1.5">{tl("Atau tentukan angka meter kumulatif baru:", "Or specify new cumulative reading:")}</label>
+                <Input type="number" step="0.1" placeholder={tl(`mis. ${(device.last?.value ?? 50000) + 10}`, `e.g. ${(device.last?.value ?? 50000) + 10}`)} value={simVal} onChange={(e) => { setSimVal(e.target.value); setSimDelta(null) }} />
+              </div>
+            </div>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => setSimOpen(false)}>{t("Batal")}</Button>
+              <Button onClick={() => sendTestReading.mutate(simVal ? { value: Number(simVal) } : { delta: simDelta ?? 5 })} disabled={sendTestReading.isPending}>
+                {sendTestReading.isPending ? <Spinner /> : <Send className="size-4" />} {tl("Kirim Pembacaan", "Send Reading")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       <Dialog open={add} onOpenChange={setAdd}>
         <DialogContent className="sm:max-w-xl">

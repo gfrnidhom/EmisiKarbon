@@ -40,19 +40,95 @@ export async function carbonFactor(orgId: number, cat: string) {
 export const iot = new Hono()
 iot.use("*", requireAuth)
 
-/** Konsumsi harian dari pembacaan meter kumulatif (selisih pembacaan terakhir tiap hari). */
+export const WIB_MS = 7 * 3600e3
+export const toWibDate = (utcStr: string): string => {
+  const ms = Date.parse(utcStr.replace(" ", "T") + "Z") + WIB_MS
+  return new Date(ms).toISOString().slice(0, 10)
+}
+export const wibMidnightUtc = (dateStr: string): string => {
+  return new Date(Date.parse(dateStr + "T00:00:00Z") - WIB_MS).toISOString().replace("T", " ").slice(0, 19)
+}
+export const startOfWeekWIB = (dateStr = todayWIB()): string => {
+  const d = new Date(dateStr + "T00:00:00Z")
+  const day = d.getUTCDay() // 0 = Sun, 1 = Mon, ..., 6 = Sat
+  const diff = day === 0 ? -6 : 1 - day
+  const mon = new Date(d.getTime() + diff * 86400e3)
+  return mon.toISOString().slice(0, 10)
+}
+
+/** Konsumsi harian dari pembacaan meter kumulatif (selisih pembacaan terakhir tiap hari di WIB). */
 export async function dailyConsumption(deviceId: number, start: string, end: string) {
-  const rows = (await q.all<{ at: string; value: number }>("SELECT at, value FROM iot_readings WHERE device_id = ? AND at >= ? AND at < ? ORDER BY at", deviceId, addDays(start, -1), addDays(end, 1)))
+  const startUtc = wibMidnightUtc(start)
+  const nextEnd = addDays(end, 1)
+  const endUtc = wibMidnightUtc(nextEnd)
+
+  const rows = await q.all<{ at: string; value: number }>(
+    "SELECT at, value FROM iot_readings WHERE device_id = ? AND at >= ? AND at < ? ORDER BY at ASC",
+    deviceId, startUtc, endUtc
+  )
+  const beforeRow = await q.get<{ at: string; value: number }>(
+    "SELECT at, value FROM iot_readings WHERE device_id = ? AND at < ? ORDER BY at DESC LIMIT 1",
+    deviceId, startUtc
+  )
+
+  const firstOfDay = new Map<string, number>()
   const lastOfDay = new Map<string, number>()
-  for (const r of rows) lastOfDay.set(r.at.slice(0, 10), r.value)
+  for (const r of rows) {
+    const d = toWibDate(r.at)
+    if (!firstOfDay.has(d)) firstOfDay.set(d, r.value)
+    lastOfDay.set(d, r.value)
+  }
+
   const out: { date: string; value: number | null }[] = []
-  let prev: number | undefined = lastOfDay.get(addDays(start, -1))
+  let prev: number | undefined = beforeRow?.value
+
   for (let d = start; d <= end; d = addDays(d, 1)) {
-    const v = lastOfDay.get(d)
-    out.push({ date: d, value: v !== undefined && prev !== undefined ? Math.max(v - prev, 0) : null })
-    if (v !== undefined) prev = v
+    const last = lastOfDay.get(d)
+    const first = firstOfDay.get(d)
+    if (last !== undefined) {
+      if (prev !== undefined) {
+        const diff = Math.max(last - prev, 0)
+        out.push({ date: d, value: Math.round(diff * 100) / 100 })
+      } else if (first !== undefined) {
+        const diff = Math.max(last - first, 0)
+        out.push({ date: d, value: Math.round(diff * 100) / 100 })
+      } else {
+        out.push({ date: d, value: 0 })
+      }
+      prev = last
+    } else {
+      out.push({ date: d, value: null })
+    }
   }
   return out
+}
+
+/** Statistik pembacaan perangkat: Hari ini, Minggu ini, Bulan ini dan emisinya. */
+export async function devicePeriodStats(deviceId: number, orgId: number, cat: string) {
+  const today = todayWIB()
+  const startOfWeek = startOfWeekWIB(today)
+  const startOfMonth = `${today.slice(0, 7)}-01`
+
+  const todayRows = await dailyConsumption(deviceId, today, today)
+  const todayUsage = todayRows[0]?.value ?? 0
+
+  const weekRows = await dailyConsumption(deviceId, startOfWeek, today)
+  const weekUsage = weekRows.reduce((s, x) => s + (x.value ?? 0), 0)
+
+  const monthRows = await dailyConsumption(deviceId, startOfMonth, today)
+  const monthUsage = monthRows.reduce((s, x) => s + (x.value ?? 0), 0)
+
+  const f = await carbonFactor(orgId, cat)
+  const todayKg = f ? Math.round(todayUsage * f.value * 10) / 10 : null
+  const weekKg = f ? Math.round(weekUsage * f.value * 10) / 10 : null
+  const monthKg = f ? Math.round(monthUsage * f.value * 10) / 10 : null
+
+  const unit = IOT_CATEGORIES[cat]?.unit ?? "kWh"
+  return {
+    today: { value: Math.round(todayUsage * 10) / 10, kg: todayKg, unit },
+    thisWeek: { value: Math.round(weekUsage * 10) / 10, kg: weekKg, unit, start: startOfWeek, end: today },
+    thisMonth: { value: Math.round(monthUsage * 10) / 10, kg: monthKg, unit, start: startOfMonth, end: today },
+  }
 }
 
 const nowUtc = () => new Date().toISOString().replace("T", " ").slice(0, 19)
@@ -88,25 +164,115 @@ function lanAddresses() {
   return Object.values(networkInterfaces()).flat().filter((n) => n && n.family === "IPv4" && !n.internal).map((n) => n!.address)
 }
 async function deviceView(d: any) {
-  const month = todayWIB().slice(0, 7)
-  const last = await q.get("SELECT at, value FROM iot_readings WHERE device_id = ? ORDER BY at DESC LIMIT 1", d.id)
-  const count = (await q.get<{ n: number }>("SELECT COUNT(*) AS n FROM iot_readings WHERE device_id = ?", d.id))!.n
-  const mtd = (await dailyConsumption(d.id, `${month}-01`, todayWIB())).reduce((s, x) => s + (x.value ?? 0), 0)
-  const connection = connectionStatus(d)
   const cat = categoryOf(d)
   const f = await carbonFactor(d.org_id, cat)
-  const carbon = { category: cat, ...IOT_CATEGORIES[cat], factor: f, kgMonth: f ? mtd * f.value : null }
-  return { ...d, category: cat, carbon, last, count, monthToDate: mtd, connection, online: connection === "terhubung", lastSeenAgeSec: ageSec(d.last_seen_at), uptime: await uptime24(d.id) }
+  const last = await q.get("SELECT at, value FROM iot_readings WHERE device_id = ? ORDER BY at DESC LIMIT 1", d.id)
+  const count = (await q.get<{ n: number }>("SELECT COUNT(*) AS n FROM iot_readings WHERE device_id = ?", d.id))!.n
+  const connection = connectionStatus(d)
+  const periods = await devicePeriodStats(d.id, d.org_id, cat)
+
+  const carbon = {
+    category: cat,
+    ...IOT_CATEGORIES[cat],
+    factor: f,
+    kgToday: periods.today.kg,
+    kgWeek: periods.thisWeek.kg,
+    kgMonth: periods.thisMonth.kg,
+  }
+
+  return {
+    ...d,
+    category: cat,
+    carbon,
+    last,
+    count,
+    periods,
+    todayUsage: periods.today.value,
+    todayKg: periods.today.kg,
+    weekUsage: periods.thisWeek.value,
+    weekKg: periods.thisWeek.kg,
+    monthToDate: periods.thisMonth.value,
+    monthKg: periods.thisMonth.kg,
+    connection,
+    online: connection === "terhubung",
+    lastSeenAgeSec: ageSec(d.last_seen_at),
+    uptime: await uptime24(d.id),
+  }
 }
+/** Sinkronisasi perangkat demo agar pembacaan selalu ada hingga hari ini */
+export async function syncDemoIot(orgId = 1) {
+  try {
+    const dev = await q.get("SELECT * FROM iot_devices WHERE token = 'demo-ngs-meter-utama'")
+    if (!dev) return
+    const today = todayWIB()
+    const nowStr = nowUtc()
+    const lastReading = await q.get<{ at: string; value: number }>("SELECT at, value FROM iot_readings WHERE device_id = ? ORDER BY at DESC LIMIT 1", dev.id)
+    let total = lastReading?.value ?? 48210
+    const lastDate = lastReading ? toWibDate(lastReading.at) : "2026-09-29"
+
+    if (lastDate < today) {
+      for (let d = addDays(lastDate, 1); d <= today; d = addDays(d, 1)) {
+        const dow = new Date(d + "T00:00:00Z").getUTCDay()
+        const cal = await q.get("SELECT type FROM calendar_days WHERE org_id = ? AND date = ?", dev.org_id, d)
+        const dailyKwh = (dow === 0 || cal?.type === "libur" ? 14 : 88) * (0.92 + Math.random() * 0.16)
+        if (d < today) {
+          total += dailyKwh
+          const at = `${d} 16:59:00`
+          await q.run("INSERT INTO iot_readings(device_id, at, value) VALUES (?,?,?)", dev.id, at, Math.round(total * 10) / 10)
+        } else {
+          const nowFraction = Math.max(0.3, ((new Date().getUTCHours() + 7) % 24) / 24)
+          total += dailyKwh * nowFraction
+          await q.run("INSERT INTO iot_readings(device_id, at, value) VALUES (?,?,?)", dev.id, nowStr, Math.round(total * 10) / 10)
+        }
+      }
+    } else {
+      const age = ageSec(dev.last_seen_at)
+      if (age === null || age > 900) {
+        total += 0.05 + Math.random() * 0.15
+        await q.run("INSERT INTO iot_readings(device_id, at, value) VALUES (?,?,?)", dev.id, nowStr, Math.round(total * 10) / 10)
+      }
+    }
+
+    await q.run(
+      "UPDATE iot_devices SET last_seen_at = ?, paired_at = COALESCE(paired_at, '2026-09-30 02:00:00'), last_ip = COALESCE(last_ip, '192.168.1.40'), firmware = COALESCE(firmware, 'ESP32-PZEM004T v1.2'), rssi = COALESCE(rssi, -58), battery = COALESCE(battery, 100), category = 'listrik_pln', status = 'aktif', interval_sec = COALESCE(interval_sec, 300) WHERE id = ?",
+      nowStr, dev.id
+    )
+    await markDirty(dev.org_id)
+  } catch (err) {
+    console.error("Gagal sinkronisasi demo iot:", err)
+  }
+}
+
 iot.get("/orgs/:orgId/iot/categories", async (c) => {
   const id = Number(c.req.param("orgId")); (await assertOrg(c, id))
   return c.json(await Promise.all(Object.entries(IOT_CATEGORIES).map(async ([k, v]) => ({ key: k, ...v, factorInfo: await carbonFactor(id, k) }))))
 })
 iot.get("/orgs/:orgId/iot", async (c) => {
   const id = Number(c.req.param("orgId")); (await assertOrg(c, id))
-  const devices = await Promise.all((await q.all("SELECT * FROM iot_devices WHERE org_id = ? ORDER BY id", id)).map(deviceView))
+  if (id === 1) await syncDemoIot(id)
+  const rawDevices = await q.all("SELECT * FROM iot_devices WHERE org_id = ? ORDER BY id", id)
+  const devices = await Promise.all(rawDevices.map(deviceView))
   const port = new URL(c.req.url).port || "3000"
-  return c.json({ devices, webhookBase: "/api/public/iot/", serverTime: nowUtc(), lan: lanAddresses().map((ip) => `http://${ip}:${port}`) })
+
+  // Ringkasan Scope 2 (Listrik PLN) dari sensor aktif
+  const listrikDevices = devices.filter((d) => (d.category === "listrik_pln" || d.source === "listrik") && d.status === "aktif")
+  const scope2Summary = {
+    activeDevices: listrikDevices.length,
+    todayKwh: Math.round(listrikDevices.reduce((s, d) => s + (d.todayUsage ?? 0), 0) * 10) / 10,
+    todayKg: Math.round(listrikDevices.reduce((s, d) => s + (d.todayKg ?? 0), 0) * 10) / 10,
+    weekKwh: Math.round(listrikDevices.reduce((s, d) => s + (d.weekUsage ?? 0), 0) * 10) / 10,
+    weekKg: Math.round(listrikDevices.reduce((s, d) => s + (d.weekKg ?? 0), 0) * 10) / 10,
+    monthKwh: Math.round(listrikDevices.reduce((s, d) => s + (d.monthToDate ?? 0), 0) * 10) / 10,
+    monthKg: Math.round(listrikDevices.reduce((s, d) => s + (d.monthKg ?? 0), 0) * 10) / 10,
+  }
+
+  return c.json({
+    devices,
+    scope2Summary,
+    webhookBase: "/api/public/iot/",
+    serverTime: nowUtc(),
+    lan: lanAddresses().map((ip) => `http://${ip}:${port}`),
+  })
 })
 iot.get("/iot/:id/heartbeats", async (c) => {
   const d = await q.get("SELECT * FROM iot_devices WHERE id = ?", (await rowId("iot_devices", c.req.param("id"))))
@@ -131,13 +297,38 @@ iot.get("/iot/:id/readings", async (c) => {
   const d = (await q.get("SELECT * FROM iot_devices WHERE id = ?", (await rowId("iot_devices", c.req.param("id")))))
   if (!d) throw bad("Perangkat tidak ditemukan", 404)
   ;(await assertOrg(c, d.org_id))
-  const days = Math.min(Number(c.req.query("days") ?? 30), 366)
+  const days = Math.min(Number(c.req.query("days") ?? 45), 366)
   const end = todayWIB(), start = addDays(end, -days + 1)
   const raw = (await q.all("SELECT at, value FROM iot_readings WHERE device_id = ? ORDER BY at DESC LIMIT 50", d.id))
   const cat = categoryOf(d)
   const f = await carbonFactor(d.org_id, cat)
-  const daily = (await dailyConsumption(d.id, start, end)).map((x) => ({ ...x, kg: f && x.value !== null ? x.value * f.value : null }))
-  return c.json({ device: { ...d, category: cat }, category: { key: cat, ...IOT_CATEGORIES[cat] }, factor: f, daily, raw })
+  const daily = (await dailyConsumption(d.id, start, end)).map((x) => ({ ...x, kg: f && x.value !== null ? Math.round(x.value * f.value * 10) / 10 : null }))
+  const periods = await devicePeriodStats(d.id, d.org_id, cat)
+  return c.json({ device: { ...d, category: cat }, category: { key: cat, ...IOT_CATEGORIES[cat] }, factor: f, periods, daily, raw })
+})
+// Kirim pembacaan uji dari UI (untuk verifikasi langsung tanpa alat fisik)
+iot.post("/iot/:id/test-reading", async (c) => {
+  const d = (await q.get("SELECT * FROM iot_devices WHERE id = ?", (await rowId("iot_devices", c.req.param("id")))))
+  if (!d) throw bad("Perangkat tidak ditemukan", 404)
+  ;(await assertOrgRole(c, d.org_id, "operator", "admin"))
+  const b = await c.req.json()
+  let val: number
+  if (b.delta != null) {
+    const last = await q.get<{ value: number }>("SELECT value FROM iot_readings WHERE device_id = ? ORDER BY at DESC LIMIT 1", d.id)
+    const base = last?.value ?? 0
+    val = Math.round((base + Number(b.delta)) * 100) / 100
+  } else if (b.value != null) {
+    val = Number(b.value)
+  } else {
+    throw bad("Nilai pembacaan (value atau delta) wajib diisi")
+  }
+  if (!(val >= 0)) throw bad("Nilai pembacaan harus positif")
+  const at = b.at ? new Date(b.at).toISOString().replace("T", " ").slice(0, 19) : nowUtc()
+  await touch(d, { rssi: b.rssi ?? -58, battery: b.battery ?? 100, firmware: "uji-ui" }, "127.0.0.1", "test_data")
+  await q.run("INSERT INTO iot_readings(device_id, at, value) VALUES (?,?,?)", d.id, at, val)
+  await markDirty(d.org_id)
+  ;(await audit(c, "iot_test_reading", "iot_device", d.id, null, { value: val, at }))
+  return c.json(await deviceView(await q.get("SELECT * FROM iot_devices WHERE id = ?", d.id)))
 })
 iot.patch("/iot/:id", async (c) => {
   const d = (await q.get("SELECT * FROM iot_devices WHERE id = ?", (await rowId("iot_devices", c.req.param("id")))))
@@ -221,9 +412,12 @@ export async function ingestIot(token: string, body: any, ip: string | null = nu
   for (const r of list.slice(0, 1000)) {
     const v = Number(r.value)
     if (!(v >= 0)) continue
-    const at = r.at ? new Date(r.at).toISOString().replace("T", " ").slice(0, 19) : new Date().toISOString().replace("T", " ").slice(0, 19)
+    const at = r.at ? new Date(r.at).toISOString().replace("T", " ").slice(0, 19) : nowUtc()
     ;(await q.run("INSERT INTO iot_readings(device_id, at, value) VALUES (?,?,?)", d.id, at, v))
     n++
+  }
+  if (n > 0) {
+    await markDirty(d.org_id)
   }
   return { ok: true, stored: n, interval_sec: d.interval_sec ?? 300 }
 }

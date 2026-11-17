@@ -162,12 +162,18 @@ export default function Dashboard() {
               </div>
             )}
             <div className="mt-5 grid grid-cols-3 gap-2">
-              {([1, 2, 3] as const).map((sc) => (
-                <div key={sc} className="rounded-2xl bg-white/10 px-3 py-2.5">
-                  <div className="text-[0.6875rem] text-white/65">{tl(["", "Scope 1 · langsung", "Scope 2 · listrik", "Scope 3 · lainnya"][sc], ["", "Scope 1 · direct", "Scope 2 · power", "Scope 3 · other"][sc])}</div>
-                  <div className="mt-0.5 font-semibold tabular">{num(d.today?.scope?.[sc] ?? 0, 0)} <span className="text-xs font-normal text-white/65">kg</span></div>
-                </div>
-              ))}
+              {([1, 2, 3] as const).map((sc) => {
+                const isIotMeasured = sc === 2 && d.today?.sources?.listrik?.label === "terukur"
+                return (
+                  <div key={sc} className="rounded-2xl bg-white/10 px-3 py-2.5">
+                    <div className="flex items-center justify-between text-[0.6875rem] text-white/65">
+                      <span>{tl(["", "Scope 1 · langsung", "Scope 2 · listrik", "Scope 3 · lainnya"][sc], ["", "Scope 1 · direct", "Scope 2 · power", "Scope 3 · other"][sc])}</span>
+                      {isIotMeasured && <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-400/25 px-1.5 py-0.2 text-[0.625rem] font-medium text-emerald-100">⚡ IoT</span>}
+                    </div>
+                    <div className="mt-0.5 font-semibold tabular">{num(d.today?.scope?.[sc] ?? 0, 0)} <span className="text-xs font-normal text-white/65">kg</span></div>
+                  </div>
+                )
+              })}
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1.5 border-t border-white/12 pt-4 text-sm">
               <span className="text-white/75">{tl("Kemarin (final)", "Yesterday (final)")} <b className="font-semibold text-white">{yKg === null ? "—" : `${num(yKg, 0)} kg`}</b>{d.yesterday && <span className="text-white/60"> · {tr("hari " + d.yesterday.dayType)}</span>}</span>
@@ -239,10 +245,14 @@ export default function Dashboard() {
                 <ScopeHeading compact scope={g.scope} totalKg={g.items.reduce((a, x) => a + x.kg, 0)} />
                 {g.items.map((x) => {
                   const I = SRC_ICON[x.k] ?? Leaf
+                  const isIot = x.k === "listrik" && (d.today?.sources?.listrik?.label === "terukur" || d.month?.sources?.listrik?.label === "terukur")
                   return (
                     <button key={x.k} onClick={() => setTrace({ date: d.date, source: x.k })} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-muted/60">
                       <span className="flex size-9 shrink-0 items-center justify-center rounded-full" style={{ background: `color-mix(in srgb, ${SOURCES[x.k]?.color} 18%, transparent)`, color: SOURCES[x.k]?.color }}><I className="size-4" /></span>
-                      <span className="w-40 shrink-0 truncate text-sm font-medium sm:w-52">{SOURCES[x.k]?.label ?? x.k}</span>
+                      <span className="w-40 shrink-0 truncate text-sm font-medium sm:w-52 flex items-center gap-1.5">
+                        <span>{SOURCES[x.k]?.label ?? x.k}</span>
+                        {isIot && <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.2 text-[0.625rem] font-semibold text-emerald-700 ring-1 ring-emerald-500/25 dark:text-emerald-300">⚡ IoT</span>}
+                      </span>
                       <span className="h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full" style={{ width: `${(x.kg / maxSrc) * 100}%`, background: SOURCES[x.k]?.color }} /></span>
                       <span className="w-24 shrink-0 text-right text-sm font-semibold tabular">{x.kg >= 1000 ? `${num(x.kg / 1000, 2)} t` : `${num(x.kg, 0)} kg`}</span>
                       <span className="hidden w-12 shrink-0 text-right text-xs text-muted-foreground sm:inline">{pct(d.month.total ? x.kg / d.month.total : 0, 0)}</span>

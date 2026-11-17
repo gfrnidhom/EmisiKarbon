@@ -74,11 +74,44 @@ async function sensorToday(orgId: number) {
     const cat = categoryOf(d), c = IOT_CATEGORIES[cat]
     if (!c || c.effect !== "emisi" || !c.source) continue
     const last = await q.get<{ value: number }>("SELECT value FROM iot_readings WHERE device_id = ? AND at >= ? ORDER BY at DESC LIMIT 1", d.id, midnightUtc)
+    if (!last) continue
     const before = await q.get<{ value: number }>("SELECT value FROM iot_readings WHERE device_id = ? AND at < ? ORDER BY at DESC LIMIT 1", d.id, midnightUtc)
-    if (!last || !before) continue
+    let qty = 0
+    if (before) {
+      qty = Math.max(last.value - before.value, 0)
+    } else {
+      const first = await q.get<{ value: number }>("SELECT value FROM iot_readings WHERE device_id = ? AND at >= ? ORDER BY at ASC LIMIT 1", d.id, midnightUtc)
+      qty = first ? Math.max(last.value - first.value, 0) : 0
+    }
     const f = await carbonFactor(orgId, cat)
     if (!f) continue
-    const qty = Math.max(last.value - before.value, 0)
+    const o = (out[c.source] ??= { kg: 0, qty: 0, unit: c.unit, devices: [] })
+    o.kg += qty * f.value; o.qty += qty; o.devices.push(d.name)
+  }
+  return out
+}
+
+/** Bacaan sensor IoT untuk satu hari tertentu (00.00 - 24.00 WIB) per sumber → kg CO2e. */
+async function sensorForDay(orgId: number, date: string) {
+  const startUtc = new Date(Date.parse(date + "T00:00:00Z") - WIB_MS).toISOString().replace("T", " ").slice(0, 19)
+  const nextDate = addDays(date, 1)
+  const endUtc = new Date(Date.parse(nextDate + "T00:00:00Z") - WIB_MS).toISOString().replace("T", " ").slice(0, 19)
+  const out: Record<string, { kg: number; qty: number; unit: string; devices: string[] }> = {}
+  for (const d of await q.all("SELECT * FROM iot_devices WHERE org_id = ? AND status = 'aktif'", orgId)) {
+    const cat = categoryOf(d), c = IOT_CATEGORIES[cat]
+    if (!c || c.effect !== "emisi" || !c.source) continue
+    const last = await q.get<{ value: number }>("SELECT value FROM iot_readings WHERE device_id = ? AND at >= ? AND at < ? ORDER BY at DESC LIMIT 1", d.id, startUtc, endUtc)
+    if (!last) continue
+    const before = await q.get<{ value: number }>("SELECT value FROM iot_readings WHERE device_id = ? AND at < ? ORDER BY at DESC LIMIT 1", d.id, startUtc)
+    let qty = 0
+    if (before) {
+      qty = Math.max(last.value - before.value, 0)
+    } else {
+      const first = await q.get<{ value: number }>("SELECT value FROM iot_readings WHERE device_id = ? AND at >= ? AND at < ? ORDER BY at ASC LIMIT 1", d.id, startUtc, endUtc)
+      qty = first ? Math.max(last.value - first.value, 0) : 0
+    }
+    const f = await carbonFactor(orgId, cat)
+    if (!f) continue
     const o = (out[c.source] ??= { kg: 0, qty: 0, unit: c.unit, devices: [] })
     o.kg += qty * f.value; o.qty += qty; o.devices.push(d.name)
   }
@@ -111,6 +144,36 @@ async function storeDay(orgId: number, date: string, ctx: OrgContext, trees: Tre
     let total = 0
     for (const s of Object.values(sources)) { scope[s.scope] += s.kg; total += s.kg }
     d = { ...d, sources, scope, total }
+  } else if (mode === "final") {
+    // Mode final: jika belum ada data aktivitas manual untuk bulan berjalan, gunakan bacaan riil IoT hari tersebut
+    const ym = monthOf(date)
+    const sensor = await sensorForDay(orgId, date)
+    let updated = false
+    const sources: DayResult["sources"] = { ...d.sources }
+    for (const [src, sn] of Object.entries(sensor)) {
+      const rec = ctx.records.get(`${src}:${ym}`)
+      if (!rec && d.sources[src]?.label !== "aktual" && sn.qty > 0) {
+        sources[src] = {
+          ...d.sources[src],
+          kg: sn.kg,
+          label: "terukur",
+          basis: { kind: "bulan_ini", period: date, text: `Bacaan sensor IoT: ${sn.qty.toFixed(1)} ${sn.unit} (${sn.devices.join(", ")})` },
+          trace: {
+            ...d.sources[src]?.trace,
+            da: sn.qty,
+            daUnit: sn.unit,
+            formula: `Bacaan nyata sensor IoT pada ${date}: ${sn.qty.toFixed(2)} ${sn.unit} × faktor emisi.`
+          }
+        }
+        updated = true
+      }
+    }
+    if (updated) {
+      const scope = { 1: 0, 2: 0, 3: 0 } as Record<1 | 2 | 3, number>
+      let total = 0
+      for (const s of Object.values(sources)) { scope[s.scope] += s.kg; total += s.kg }
+      d = { ...d, sources, scope, total }
+    }
   }
   const tu = treeDaily(trees, date, date)[0]
   const ts = treeStock(trees, date)

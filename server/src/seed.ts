@@ -252,19 +252,27 @@ await transaction(async () => {
 // ---------- sensor IoT (beta V3): meter kWh utama Ngasem, pembacaan kumulatif harian ----------
 {
   const nowStr = new Date().toISOString().replace("T", " ").slice(0, 19)
-  const dev = id(await q.run("INSERT INTO iot_devices(org_id, name, kind, unit, source, token, location, interval_sec, firmware, rssi, created_at) VALUES (1, 'Meter utama PLN', 'kwh_meter', 'kWh', 'listrik', 'demo-ngs-meter-utama', 'Panel listrik utama, ruang TU', 900, 'ESP32-PZEM004T v1.2', -61, '2026-09-28 08:00:00')"))
+  const dev = id(await q.run("INSERT INTO iot_devices(org_id, name, kind, unit, source, category, token, location, interval_sec, firmware, rssi, status, created_at) VALUES (1, 'Meter utama PLN', 'kwh_meter', 'kWh', 'listrik', 'listrik_pln', 'demo-ngs-meter-utama', 'Panel listrik utama, ruang TU', 300, 'ESP32-PZEM004T v1.2', -58, 'aktif', '2026-09-28 08:00:00')"))
   let total = 48210, lastAt: string | null = null
-  for (let d = "2026-09-30"; d <= todayWIB(); d = addDays(d, 1)) {
-    const at = `${d} 16:59:00`
-    if (at > nowStr) break // tidak membuat data di masa depan
+  const today = todayWIB()
+  for (let d = "2026-09-30"; d <= today; d = addDays(d, 1)) {
     const dow = new Date(d + "T00:00:00Z").getUTCDay()
     const cal = await q.get("SELECT type FROM calendar_days WHERE org_id = 1 AND date = ?", d)
-    total += (dow === 0 || cal?.type === "libur" ? 14 : 88) * (0.92 + Math.random() * 0.16)
-    await q.run("INSERT INTO iot_readings(device_id, at, value) VALUES (?,?,?)", dev, at, Math.round(total * 10) / 10)
-    lastAt = at
+    const dailyKwh = (dow === 0 || cal?.type === "libur" ? 14 : 88) * (0.92 + Math.random() * 0.16)
+    if (d < today) {
+      total += dailyKwh
+      const at = `${d} 16:59:00`
+      await q.run("INSERT INTO iot_readings(device_id, at, value) VALUES (?,?,?)", dev, at, Math.round(total * 10) / 10)
+      lastAt = at
+    } else {
+      const nowFraction = Math.max(0.3, ((new Date().getUTCHours() + 7) % 24) / 24)
+      total += dailyKwh * nowFraction
+      await q.run("INSERT INTO iot_readings(device_id, at, value) VALUES (?,?,?)", dev, nowStr, Math.round(total * 10) / 10)
+      lastAt = nowStr
+    }
   }
-  await q.run("UPDATE iot_devices SET last_seen_at = ?, paired_at = '2026-09-30 02:00:00', last_ip = '192.168.1.40' WHERE id = ?", lastAt, dev)
-  await q.run("INSERT INTO iot_devices(org_id, name, kind, unit, source, token, location, status, interval_sec) VALUES (1, 'Meter PLTS (inverter)', 'kwh_meter', 'kWh', 'plts', 'demo-ngs-inverter', 'Atap gedung B', 'aktif', 300)")
+  await q.run("UPDATE iot_devices SET last_seen_at = ?, paired_at = '2026-09-30 02:00:00', last_ip = '192.168.1.40', battery = 100 WHERE id = ?", lastAt, dev)
+  await q.run("INSERT INTO iot_devices(org_id, name, kind, unit, source, category, token, location, status, interval_sec) VALUES (1, 'Meter PLTS (inverter)', 'kwh_meter', 'kWh', 'plts', 'plts', 'demo-ngs-inverter', 'Atap gedung B', 'aktif', 300)")
 }
 
 // ---------- baseline Ngasem: dikunci (BL-2025-v1); Purwosari: draf ----------
