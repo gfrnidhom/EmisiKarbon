@@ -341,43 +341,42 @@ iot.post("/iot/:id/test-connection", async (c) => {
 
   const now = nowUtc()
   let isConnected = false
-  let failMsg = "Perangkat tidak merespon (timeout / tidak terjangkau)"
 
   // Uji koneksi nyata ke perangkat IoT (bila memiliki IP lokal dan port HTTP)
-  if (d.last_ip && !d.last_ip.startsWith("127.") && d.last_ip !== "0.0.0.0") {
+  const probeIp = d.last_ip ? d.last_ip.split(",")[0].trim() : null
+  if (probeIp && !probeIp.startsWith("127.") && probeIp !== "0.0.0.0") {
     try {
       const ctrl = new AbortController()
       const t = setTimeout(() => ctrl.abort(), 1500)
-      const res = await fetch(`http://${d.last_ip}/ping`, { signal: ctrl.signal })
+      const res = await fetch(`http://${probeIp}/ping`, { signal: ctrl.signal })
       clearTimeout(t)
       if (res.ok) isConnected = true
-    } catch (e: any) {
+    } catch {
       isConnected = false
-      failMsg = e?.name === "AbortError" ? "Waktu tunggu habis (timeout 1.5 detik)" : `Gagal menghubungi http://${d.last_ip}/ping`
     }
   }
 
   if (isConnected) {
     await q.run("UPDATE iot_devices SET last_seen_at = ? WHERE id = ?", now, d.id)
-    await q.run("INSERT INTO iot_heartbeats(device_id, at, kind, ip) VALUES (?,?,'ping_sukses',?)", d.id, now, d.last_ip)
+    await q.run("INSERT INTO iot_heartbeats(device_id, at, kind, ip) VALUES (?,?,'ping_sukses',?)", d.id, now, probeIp)
     await markDirty(d.org_id)
     return c.json({
       ok: true,
       connected: true,
       status: "terhubung",
-      message: "Perangkat IoT merespon dengan baik (Terhubung)",
+      message: "Perangkat IoT merespon — Status: Terhubung",
     })
   } else {
     // Tandai perangkat tidak terhubung: mundurkan last_seen_at lebih dari 6 jam (status menjadi 'terputus')
     const disconnectedTime = addDays(todayWIB(), -1) + " 00:00:00"
     await q.run("UPDATE iot_devices SET last_seen_at = ? WHERE id = ?", disconnectedTime, d.id)
-    await q.run("INSERT INTO iot_heartbeats(device_id, at, kind, ip) VALUES (?,?,'ping_gagal',?)", d.id, now, d.last_ip)
+    await q.run("INSERT INTO iot_heartbeats(device_id, at, kind, ip) VALUES (?,?,'ping_gagal',?)", d.id, now, probeIp)
     await markDirty(d.org_id)
     return c.json({
       ok: false,
       connected: false,
       status: "terputus",
-      message: `Perangkat IoT tidak merespon (${failMsg}). Status diubah menjadi Tidak Terhubung (Terputus).`,
+      message: "Perangkat IoT tidak merespon — Status: Terputus",
     })
   }
 })
@@ -429,8 +428,9 @@ iot.post("/iot/:id/to-activity", async (c) => {
 })
 
 /** Webhook publik untuk perangkat: POST /api/public/iot/:token  {value, at?} atau {readings:[{at,value}]} */
-async function touch(d: any, body: any, ip: string | null, kind: string) {
+async function touch(d: any, body: any, rawIp: string | null, kind: string) {
   const at = nowUtc()
+  const ip = rawIp ? rawIp.split(",")[0].trim() : null
   const rssi = Number.isFinite(Number(body?.rssi)) ? Math.round(Number(body.rssi)) : null
   const battery = Number.isFinite(Number(body?.battery)) ? Number(body.battery) : null
   await q.run("UPDATE iot_devices SET last_seen_at = ?, last_ip = ?, rssi = COALESCE(?, rssi), battery = COALESCE(?, battery), firmware = COALESCE(?, firmware), paired_at = COALESCE(paired_at, ?) WHERE id = ?",

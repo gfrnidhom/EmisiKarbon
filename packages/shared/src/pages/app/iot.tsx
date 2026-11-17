@@ -110,16 +110,16 @@ export default function Iot() {
     },
     onSuccess: (res: any) => {
       if (res.connected) {
-        toast.success(tl("Perangkat IoT merespon — Terhubung", "IoT device responded — Connected"))
+        toast.success(tl("Perangkat IoT merespon — Status: Terhubung", "IoT device responded — Status: Connected"))
       } else {
-        toast.error(tl(res.message ?? "Perangkat IoT tidak merespon — Status: Terputus", res.message ?? "IoT device did not respond — Disconnected"))
+        toast.error(tl("Perangkat IoT tidak merespon — Status: Terputus", "IoT device did not respond — Status: Disconnected"))
       }
       refresh()
       qc.invalidateQueries({ queryKey: ["dashboard"] })
       qc.invalidateQueries({ queryKey: ["trace-page"] })
     },
-    onError: (e: Error) => {
-      toast.error(e.message)
+    onError: () => {
+      toast.error(tl("Perangkat IoT tidak merespon — Status: Terputus", "IoT device did not respond — Status: Disconnected"))
       refresh()
     },
   })
@@ -197,7 +197,7 @@ export default function Iot() {
                     [tl("Sinyal Wi-Fi", "Wi-Fi signal"), device.rssi != null ? <span className="inline-flex items-center gap-2"><SignalBars rssi={device.rssi} />{device.rssi} dBm</span> : "–"],
                     [tl("Baterai", "Battery"), device.battery != null ? <span className="inline-flex items-center gap-1"><BatteryMedium className="size-4" />{num(device.battery)}%</span> : "–"],
                     [tl("Firmware", "Firmware"), device.firmware ?? "–"],
-                    [tl("Alamat IP", "IP address"), <span className="font-mono text-xs">{device.last_ip ?? "–"}</span>],
+                    [tl("Alamat IP", "IP address"), <span className="font-mono text-xs">{device.last_ip ? device.last_ip.split(",")[0].trim() : "–"}</span>],
                   ].map(([k, v], i) => <div key={i}><dt className="text-xs text-muted-foreground">{k}</dt><dd className="mt-1 font-medium">{v}</dd></div>)}
                 </dl>
 

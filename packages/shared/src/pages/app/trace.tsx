@@ -73,6 +73,7 @@ export default function TracePage() {
           <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-medium capitalize", d.k > 0 ? "bg-primary/12 text-primary" : "bg-muted text-muted-foreground")}>{tl("hari", "day")} {d.dayType}{d.k > 0 && d.k < 1 ? ` · ${pct(d.k)} ${tl("hadir", "attendance")}` : ""}</span>
         </>}
         actions={<>
+          <Button variant="outline" render={<Link to="/app" />}><ChevronLeft /> {tl("Dasbor", "Dashboard")}</Button>
           <Button variant="outline" render={<Link to="/app/carbon" />}><Layers /> {tl("Rapor bulanan", "Monthly report")}</Button>
           <div className="flex items-center gap-1 rounded-full bg-card p-1 ring-1 ring-border">
             <Button size="icon-sm" variant="ghost" aria-label={tl("Hari sebelumnya", "Previous day")} onClick={() => set({ date: addDays(date, -1) })}><ChevronLeft /></Button>
@@ -196,13 +197,40 @@ export default function TracePage() {
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
                             <span className="font-semibold text-foreground text-base">{s.iot.name}</span>
-                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-                              <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                              {tl("Terhubung", "Connected")}
-                            </span>
+                            {(() => {
+                              const conn = s.iot.connection ?? "terhubung"
+                              if (conn === "terhubung") {
+                                return (
+                                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-500/25 dark:text-emerald-300">
+                                    <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+                                    {tl("Terhubung", "Connected")}
+                                  </span>
+                                )
+                              } else if (conn === "terlambat") {
+                                return (
+                                  <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-semibold text-amber-700 ring-1 ring-amber-500/25 dark:text-amber-300">
+                                    <span className="size-2 rounded-full bg-amber-500" />
+                                    {tl("Terlambat", "Delayed")}
+                                  </span>
+                                )
+                              } else if (conn === "terputus") {
+                                return (
+                                  <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-500/15 px-2.5 py-0.5 text-xs font-semibold text-rose-700 ring-1 ring-rose-500/25 dark:text-rose-300">
+                                    <span className="size-2 rounded-full bg-rose-500" />
+                                    {tl("Tidak Terhubung", "Disconnected")}
+                                  </span>
+                                )
+                              } else {
+                                return (
+                                  <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-xs font-semibold text-muted-foreground ring-1 ring-border">
+                                    {tl("Belum Terhubung", "Not Paired")}
+                                  </span>
+                                )
+                              }
+                            })()}
                           </div>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            {s.iot.location ?? "Panel Listrik"} · {s.iot.firmware ?? "ESP32-PZEM004T"} {s.iot.rssi != null ? `· ${s.iot.rssi} dBm` : ""}
+                            {[s.iot.location, s.iot.firmware, s.iot.rssi != null ? `${s.iot.rssi} dBm` : null].filter(Boolean).join(" · ") || tl("Panel Listrik", "Electrical Panel")}
                           </p>
                         </div>
                       </div>

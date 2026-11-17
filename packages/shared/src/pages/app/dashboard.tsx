@@ -14,7 +14,6 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorState, PageSkeleton } from "@/components/common"
 import { CalendarHeatmap, CountUp, EmissionExplorer, Gauge, InteractiveDonut, type ExplorerMode } from "@/components/interactive-charts"
-import { TraceSheet } from "@/components/trace-sheet"
 import { api } from "@/lib/api"
 import { useOrg } from "@/lib/hooks"
 import { useAuth } from "@/lib/auth"
@@ -38,7 +37,9 @@ export default function Dashboard() {
   const [showBaseline, setShowBaseline] = useState(true)
   const [showAverage, setShowAverage] = useState(false)
   const [focus, setFocus] = useState<string | null>(null)
-  const [trace, setTrace] = useState<{ date: string; source?: string } | null>(null)
+  const goToTrace = (date: string, source?: string) => {
+    nav(`/app/trace?date=${date}${source ? `&source=${source}` : ""}`)
+  }
   const [barMode, setBarMode] = useState<"day" | "week">("day")
   const today = todayWIB()
   // filter periode untuk statistik neraca karbon (Hari ini · Kemarin · 1 minggu · 1 bulan · 6 bulan · 1 tahun · Kustom)
@@ -150,7 +151,7 @@ export default function Dashboard() {
                 {isFetching ? <Pause className="size-3.5" /> : <RefreshCw className="size-3.5" />}{tl(`diperbarui ${updated} WIB`, `updated ${updated} WIB`)}
               </button>
             </div>
-            <button onClick={() => setTrace({ date: d.date })} className="mt-3 block text-left">
+            <button onClick={() => goToTrace(d.date)} className="mt-3 block text-left">
               <span className="text-[3.25rem] leading-none font-semibold tracking-tight tabular sm:text-[3.75rem]"><CountUp value={todayKg} format={(v) => num(v, 0)} /></span>
               <span className="ml-2 text-lg text-white/75">kg CO₂e</span>
             </button>
@@ -165,7 +166,7 @@ export default function Dashboard() {
               {([1, 2, 3] as const).map((sc) => {
                 const isIotMeasured = sc === 2 && (d.today?.sources?.listrik?.label === "terukur" || d.iotListrik)
                 return (
-                  <button key={sc} onClick={() => setTrace({ date: d.date, source: sc === 2 ? "listrik" : undefined })} className="rounded-2xl bg-white/10 px-3 py-2.5 text-left transition-colors hover:bg-white/15 cursor-pointer">
+                  <button key={sc} onClick={() => goToTrace(d.date, sc === 2 ? "listrik" : undefined)} className="rounded-2xl bg-white/10 px-3 py-2.5 text-left transition-colors hover:bg-white/15 cursor-pointer">
                     <div className="flex items-center justify-between text-[0.6875rem] text-white/65">
                       <span>{tl(["", "Scope 1 · langsung", "Scope 2 · listrik", "Scope 3 · lainnya"][sc], ["", "Scope 1 · direct", "Scope 2 · power", "Scope 3 · other"][sc])}</span>
                       {isIotMeasured && <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-400/25 px-1.5 py-0.2 text-[0.625rem] font-medium text-emerald-100">⚡ IoT</span>}
@@ -248,7 +249,7 @@ export default function Dashboard() {
                   const isIot = x.k === "listrik" && (d.today?.sources?.listrik?.label === "terukur" || d.month?.sources?.listrik?.label === "terukur" || d.iotListrik)
                   return (
                     <div key={x.k} className="space-y-1">
-                      <button onClick={() => setTrace({ date: d.date, source: x.k })} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-muted/60">
+                      <button onClick={() => goToTrace(d.date, x.k)} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-muted/60">
                         <span className="flex size-9 shrink-0 items-center justify-center rounded-full" style={{ background: `color-mix(in srgb, ${SOURCES[x.k]?.color} 18%, transparent)`, color: SOURCES[x.k]?.color }}><I className="size-4" /></span>
                         <span className="w-40 shrink-0 truncate text-sm font-medium sm:w-52 flex items-center gap-1.5">
                           <span>{SOURCES[x.k]?.label ?? x.k}</span>
@@ -273,7 +274,7 @@ export default function Dashboard() {
                                 {tl("Data Riil Sensor", "Real Sensor Data")}
                               </span>
                             </div>
-                            <button onClick={() => setTrace({ date: d.date, source: "listrik" })} className="font-medium text-primary hover:underline inline-flex items-center gap-1">
+                            <button onClick={() => goToTrace(d.date, "listrik")} className="font-medium text-primary hover:underline inline-flex items-center gap-1">
                               {tl("Detail perhitungan", "Calculation details")} <ArrowUpRight className="size-3" />
                             </button>
                           </div>
@@ -322,7 +323,7 @@ export default function Dashboard() {
               </ToggleGroup>
             </CardAction>
           </CardHeader>
-          <CardContent className="pt-4">{bars.length ? <PillBars bars={bars} onPick={(b) => setTrace({ date: b.date })} /> : <Skeleton className="h-60 rounded-2xl" />}</CardContent>
+          <CardContent className="pt-4">{bars.length ? <PillBars bars={bars} onPick={(b) => goToTrace(b.date)} /> : <Skeleton className="h-60 rounded-2xl" />}</CardContent>
         </Card>
       </div>
 
@@ -339,7 +340,7 @@ export default function Dashboard() {
               const I = SRC_ICON[k] ?? Leaf, ch = v.change as number | null
               const flat = ch === null || Math.abs(ch) < 0.005
               return (
-                <button key={k} onClick={() => setTrace({ date: d.date, source: k })} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-muted/60">
+                <button key={k} onClick={() => goToTrace(d.date, k)} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-muted/60">
                   <span className="flex size-9 shrink-0 items-center justify-center rounded-full" style={{ background: `color-mix(in srgb, ${SOURCES[k]?.color} 18%, transparent)`, color: SOURCES[k]?.color }}><I className="size-4" /></span>
                   <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{SOURCES[k]?.label ?? k}</span><span className="block truncate text-xs text-muted-foreground">{num(v.current, 3)} {tl("vs", "vs")} {num(v.baseline, 3)} {tl("kg/orang/hari", "kg/person/day")}</span></span>
                   <span className={cn("shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold tabular", flat ? "bg-muted text-muted-foreground" : ch! < 0 ? "bg-primary/10 text-primary" : "bg-amber-500/12 text-amber-700 dark:text-amber-400")}>
@@ -381,7 +382,7 @@ export default function Dashboard() {
                 {[
                   [tl("Total periode", "Period total"), ton(rangeStats.total), null],
                   [tl("Rata-rata hari aktif", "Avg active day"), kg(rangeStats.avgActive, 0), null],
-                  [tl("Hari puncak", "Peak day"), `${kg(rangeStats.peak.total, 0)}`, () => setTrace({ date: rangeStats.peak.date })],
+                  [tl("Hari puncak", "Peak day"), `${kg(rangeStats.peak.total, 0)}`, () => goToTrace(rangeStats.peak.date)],
                   [tl("vs baseline", "vs baseline"), signedPct(rangeStats.vsBase), null],
                 ].map(([l, v, fn]: any, i) => (
                   <button key={i} disabled={!fn} onClick={fn ?? undefined} className={cn("rounded-2xl bg-muted/60 px-4 py-3 text-left", fn && "transition-colors hover:bg-primary/8")}>
@@ -393,7 +394,7 @@ export default function Dashboard() {
             )}
             {series.isLoading ? <Skeleton className="h-[21.25rem] rounded-xl" /> : (
               <div className={cn("transition-opacity", series.isFetching && "opacity-60")}>
-                <EmissionExplorer days={days} mode={mode} chartType={chartType} showBaseline={showBaseline} showAverage={showAverage} focus={focus} onPick={(date) => setTrace({ date })} />
+                <EmissionExplorer days={days} mode={mode} chartType={chartType} showBaseline={showBaseline} showAverage={showAverage} focus={focus} onPick={(date) => goToTrace(date)} />
               </div>
             )}
             {rangeStats && rangeStats.projectedShare > 0 && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Info className="size-3.5" />{pct(rangeStats.projectedShare)} {tl("dari angka periode ini masih Proyeksi (menunggu data aktual).", "of this period is still Projected (awaiting actual data).")}</p>}
@@ -430,7 +431,7 @@ export default function Dashboard() {
             <CardTitle className="flex items-center gap-2"><CalendarDays className="size-5 text-primary" />{tl("Kalender emisi 26 minggu", "26-week emission calendar")}</CardTitle>
             <CardDescription>{tl("Tiap kotak = satu hari · warna lebih pekat = emisi lebih tinggi · klik untuk telusuri", "Each square = one day · darker = higher emissions · click to trace")}</CardDescription>
           </CardHeader>
-          <CardContent>{heat.data ? <CalendarHeatmap days={heat.data.days} onPick={(date) => setTrace({ date })} /> : <Skeleton className="h-32 rounded-xl" />}</CardContent>
+          <CardContent>{heat.data ? <CalendarHeatmap days={heat.data.days} onPick={(date) => goToTrace(date)} /> : <Skeleton className="h-32 rounded-xl" />}</CardContent>
         </Card>
         <div className="space-y-5">
         <Card>
@@ -447,8 +448,6 @@ export default function Dashboard() {
         </div>
       </div>
       </MoreSection>
-
-      <TraceSheet orgId={orgId} date={trace?.date ?? null} source={trace?.source} open={!!trace} onOpenChange={(o) => !o && setTrace(null)} />
     </div>
   )
 }
