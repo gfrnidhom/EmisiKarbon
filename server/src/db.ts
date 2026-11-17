@@ -6,11 +6,12 @@ import { AsyncLocalStorage } from "node:async_hooks"
 import { mkdirSync } from "fs"
 import { dirname } from "path"
 import { SCHEMA } from "./schema"
+import { CONFIG, applyEnvConfig } from "./config"
 
 export type Row = Record<string, any>
 export interface RunResult { lastInsertRowid: number; changes: number }
 
-const DATABASE_URL = process.env.DATABASE_URL
+const DATABASE_URL = CONFIG.DATABASE_URL
 export const DIALECT: "postgres" | "sqlite" = DATABASE_URL ? "postgres" : "sqlite"
 
 // Tabel yang memakai kolom id serial → INSERT otomatis "RETURNING id"
@@ -89,7 +90,7 @@ if (DIALECT === "postgres") {
   }
 } else {
   const { Database } = await import("bun:sqlite")
-  const DB_PATH = process.env.DB_PATH ?? new URL("../data/jejakhijau.sqlite", import.meta.url).pathname
+  const DB_PATH = CONFIG.DB_PATH
   mkdirSync(dirname(DB_PATH), { recursive: true })
   const sdb = new Database(DB_PATH, { create: true, strict: true })
   sdb.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")
@@ -207,3 +208,4 @@ export async function getSetting<T>(key: string, fallback: T): Promise<T> {
 export async function setSetting(key: string, value: unknown) {
   await q.run("INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, JSON.stringify(value))
 }
+applyEnvConfig(await getSetting("env_config", null))

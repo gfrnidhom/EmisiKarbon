@@ -1,13 +1,8 @@
 import { useMemo, useState, type ReactNode } from "react"
-import { toast } from "sonner"
-import { ChevronDown, ClipboardCopy, Sparkles } from "lucide-react"
+import { ChevronDown } from "lucide-react"
 import { Delta, StatTile } from "@/components/dash-kit"
 import { CountUp } from "@/components/interactive-charts"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { num, SOURCES } from "@/lib/format"
+import { num } from "@/lib/format"
 import { tl } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
@@ -47,90 +42,12 @@ export type Balance = ReturnType<typeof carbonBalance>
 
 const fmtKg = (v: number) => (Math.abs(v) >= 1000 ? `${num(v / 1000, 2)} t` : `${num(v, Math.abs(v) < 10 ? 2 : 0)} kg`)
 
-/* ---------------- template prompt ---------------- */
-
-export function promptBlank() {
-  return `Bertindaklah sebagai ahli akuntansi karbon, lingkungan, dan mitigasi perubahan iklim. Analisis data aktivitas saya di bawah ini dan berikan laporan lengkap dalam 4 poin utama, ditambah rekomendasi.
-
-Data Aktivitas Saya:
-- Periode: [Harian / Bulanan - sebutkan bulannya jika ada]
-- Penggunaan Energi/BBM/Transportasi: [Contoh: Penggunaan listrik X kWh, kendaraan bermotor Y km/hari, LPG Z kg, sampah W kg, dll.]
-- Jumlah pohon yang sudah ditanam saat ini (Imbal Jasa): [Masukkan angka pohon eksisting, atau tulis 'Belum ada']
-
-Tolong hitungkan dan tampilkan dalam format berikut:
-1. Rekap Emisi Karbon: Total emisi yang dihasilkan dalam satuan kg atau ton CO₂eq untuk periode tersebut (sebutkan faktor emisi yang dipakai).
-2. Konversi ke Jumlah Pohon (Imbal Jasa): Berapa jumlah pohon yang harus ditanam untuk mengimbangi (offset) emisi tersebut? (Sebutkan asumsi penyerapan karbon per pohon per tahun yang Anda gunakan).
-3. Emisi yang Sudah Diserap: Berdasarkan jumlah pohon yang sudah ditanam, berapa estimasi total emisi yang saat ini sudah berhasil diserap?
-4. Defisit / Utang Karbon: Selisih antara emisi yang dihasilkan dan emisi yang sudah diserap (apakah masih defisit/utang karbon, atau sudah surplus)?
-5. Rekomendasi: 3–5 langkah paling berdampak untuk menurunkan emisi dan menutup utang karbon, urut dari yang termudah.
-
-Sajikan hasil analisis ini dalam bentuk tabel ringkas dan penjelasan singkat yang mudah dipahami.`
-}
-
-export function promptFilled(b: Balance, ctx: { org?: string; periodLabel: string }) {
-  const src = b.sources.length
-    ? b.sources.map(([k, v]) => `  • ${SOURCES[k]?.label ?? k}: ${num(v, 1)} kg CO₂e`).join("\n")
-    : "  • [Isi penggunaan listrik (kWh), BBM (liter), kendaraan (km/hari), LPG (kg), sampah (kg)]"
-  return `Bertindaklah sebagai ahli akuntansi karbon, lingkungan, dan mitigasi perubahan iklim. Analisis data aktivitas saya di bawah ini dan berikan laporan lengkap dalam 4 poin utama, ditambah rekomendasi.
-
-Data Aktivitas Saya${ctx.org ? ` (${ctx.org})` : ""}:
-- Periode: ${ctx.periodLabel} (${b.days} hari)
-- Penggunaan Energi/BBM/Transportasi (sudah dikonversi aplikasi ke emisi, faktor emisi nasional):
-${src}
-  Total: ${num(b.emissionKg, 1)} kg CO₂e
-- Jumlah pohon yang sudah ditanam saat ini (Imbal Jasa): ${b.treeCount > 0 ? `${num(b.treeCount)} pohon` : "Belum ada"}${b.measured ? `\n- Serapan pohon terukur periode ini (model riap aplikasi): ${num(b.absorbed, 1)} kg CO₂` : ""}
-
-Tolong hitungkan dan tampilkan dalam format berikut:
-1. Rekap Emisi Karbon: Total emisi yang dihasilkan dalam satuan kg atau ton CO₂eq untuk periode tersebut.
-2. Konversi ke Jumlah Pohon (Imbal Jasa): Berapa jumlah pohon yang harus ditanam untuk mengimbangi (offset) emisi tersebut? (Sebutkan asumsi penyerapan karbon per pohon per tahun yang Anda gunakan; sebagai pembanding aplikasi memakai ${TREE_KG_PER_YEAR} kg CO₂/pohon/tahun).
-3. Emisi yang Sudah Diserap: Berdasarkan jumlah pohon yang sudah ditanam, berapa estimasi total emisi yang saat ini sudah berhasil diserap?
-4. Defisit / Utang Karbon: Selisih antara emisi yang dihasilkan dan emisi yang sudah diserap (apakah masih defisit/utang karbon, atau sudah surplus)?
-5. Rekomendasi: 3–5 langkah paling berdampak untuk menurunkan emisi dan menutup utang karbon, disesuaikan dengan sumber emisi terbesar di atas.
-
-Sajikan hasil analisis ini dalam bentuk tabel ringkas dan penjelasan singkat yang mudah dipahami.`
-}
-
-async function copy(text: string) {
-  try { await navigator.clipboard.writeText(text); toast.success(tl("Prompt disalin — tempel ke ChatGPT / Gemini", "Prompt copied — paste into ChatGPT / Gemini")) }
-  catch { toast.error(tl("Gagal menyalin, salin manual dari kotak teks", "Copy failed, copy manually from the text box")) }
-}
-
-export function PromptTemplateDialog({ open, onOpenChange, balance, org, periodLabel }: { open: boolean; onOpenChange: (o: boolean) => void; balance: Balance; org?: string; periodLabel: string }) {
-  const filled = useMemo(() => promptFilled(balance, { org, periodLabel }), [balance, org, periodLabel])
-  const [tab, setTab] = useState("filled")
-  const [text, setText] = useState<Record<string, string>>({})
-  const value = text[tab] ?? (tab === "filled" ? filled : promptBlank())
-  return (
-    <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) setText({}) }}>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Sparkles className="size-4 text-primary" />{tl("Template Prompt Analisis Karbon", "Carbon Analysis Prompt Template")}</DialogTitle>
-          <DialogDescription>{tl("Salin lalu tempel ke asisten AI (ChatGPT, Gemini, dll.) untuk laporan naratif. Versi terisi sudah memuat data periode ini; teks bisa diedit dulu.", "Copy and paste into an AI assistant (ChatGPT, Gemini, etc.) for a narrative report. The filled version already contains this period's data; you can edit it first.")}</DialogDescription>
-        </DialogHeader>
-        <Tabs value={tab} onValueChange={(v) => setTab(String(v))}>
-          <TabsList>
-            <TabsTrigger value="filled">{tl("Terisi data saya", "Filled with my data")}</TabsTrigger>
-            <TabsTrigger value="blank">{tl("Template kosong", "Blank template")}</TabsTrigger>
-          </TabsList>
-          <TabsContent value={tab} className="mt-3">
-            <Textarea value={value} onChange={(e) => setText({ ...text, [tab]: e.target.value })} className="h-80 font-mono text-xs leading-relaxed" />
-          </TabsContent>
-        </Tabs>
-        <DialogFooter>
-          {text[tab] !== undefined && <Button variant="ghost" onClick={() => setText({ ...text, [tab]: undefined as any })}>{tl("Kembalikan", "Reset")}</Button>}
-          <Button onClick={() => copy(value)}><ClipboardCopy /> {tl("Salin prompt", "Copy prompt")}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 /* ---------------- statistik neraca ---------------- */
 
 const big = (v: number) => (Math.abs(v) >= 1000 ? { v: num(Math.abs(v) / 1000, 2), u: "t" } : { v: num(Math.abs(v), Math.abs(v) < 10 ? 2 : 0), u: "kg" })
 
-/** 4 statistik neraca karbon: rekap emisi · pohon dibutuhkan · sudah diserap · defisit/surplus — plus rekomendasi & template prompt AI. */
-export function CarbonBalanceStats({ input, periodLabel, org, onEmission, onTrees, header, loading }: { input: BalanceInput; periodLabel: string; org?: string; onEmission?: () => void; onTrees?: () => void; header?: ReactNode; loading?: boolean }) {
+/** 4 statistik neraca karbon: rekap emisi · pohon dibutuhkan · sudah diserap · defisit/surplus. */
+export function CarbonBalanceStats({ input, periodLabel, onEmission, onTrees, header, loading }: { input: BalanceInput; periodLabel: string; org?: string; onEmission?: () => void; onTrees?: () => void; header?: ReactNode; loading?: boolean }) {
   const key = JSON.stringify(input)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const b = useMemo(() => carbonBalance(input), [key])
@@ -154,19 +71,16 @@ export function CarbonBalanceStats({ input, periodLabel, org, onEmission, onTree
           value={<span>{deficit ? "−" : "+"}<CountUp value={bal.u === "t" ? Math.abs(b.balance) / 1000 : Math.abs(b.balance)} format={(v) => num(v, bal.u === "t" ? 2 : 0)} /></span>}
           foot={foot(deficit ? tl(`kurang ±${num(b.treeGap)} pohon · serapan menutup ${num(b.offsetShare * 100, 1)}%`, `about ${num(b.treeGap)} trees short · uptake covers ${num(b.offsetShare * 100, 1)}%`) : tl("serapan pohon melampaui emisi", "tree uptake exceeds emissions"), "text-white/80")} />
       </div>
-      <InsightBar balance={b} org={org} periodLabel={periodLabel} />
     </div>
   )
 }
 
-/** Baris ringkas: kalimat tambahan (opsional) + tombol template prompt AI. */
-export function InsightBar({ balance: b, org, periodLabel, lead }: { balance: Balance; org?: string; periodLabel: string; lead?: ReactNode }) {
-  const [open, setOpen] = useState(false)
+/** Baris informasi ringkas (opsional). */
+export function InsightBar({ lead }: { balance?: Balance; org?: string; periodLabel?: string; lead?: ReactNode }) {
+  if (!lead) return null
   return (
-    <div className={cn("flex flex-wrap items-center gap-2", lead ? "rounded-2xl bg-card px-5 py-3 ring-1 ring-border" : "justify-end")}>
-      {lead && <div className="min-w-0 flex-1 text-sm text-muted-foreground">{lead}</div>}
-      <Button size="sm" variant="outline" className="border-primary text-primary hover:text-primary" onClick={() => setOpen(true)}><Sparkles /> {tl("Template prompt AI", "AI prompt template")}</Button>
-      <PromptTemplateDialog open={open} onOpenChange={setOpen} balance={b} org={org} periodLabel={periodLabel} />
+    <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-card px-5 py-3 ring-1 ring-border">
+      <div className="min-w-0 flex-1 text-sm text-muted-foreground">{lead}</div>
     </div>
   )
 }

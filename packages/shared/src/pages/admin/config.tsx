@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Field, PageHeader, PageSkeleton } from "@/components/common"
+import { AdminEnvConfigCard } from "@/components/admin-env-config"
 import { api } from "@/lib/api"
 import { fmtDateTime, num } from "@/lib/format"
 import { t } from "@/lib/i18n"
@@ -44,6 +45,7 @@ export default function Config() {
           </Card>
         </div>
       </div>
+      <AdminEnvConfigCard />
     </div>
   )
 }

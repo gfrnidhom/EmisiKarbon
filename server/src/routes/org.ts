@@ -9,6 +9,7 @@ import { computeAvoided, computeDay, computeRange, dayInfo, loadContext, loadTre
 import { assetEco, closingInfo, dataStartDate, isLocked, markDirty, readDay, readDays, sumEco } from "../engine/ledger"
 import { createTask, monitoringTasks, validateActivity, populationOf } from "../engine/services"
 import { SOURCE_META } from "../engine/factors"
+import { CONFIG } from "../config"
 
 export const org = new Hono()
 org.use("*", requireAuth)
@@ -36,6 +37,42 @@ org.patch("/:orgId", async (c) => {
   const warn = before.students && Math.abs(after!.students - before.students) / before.students > 0.1
   ;(await markDirty(id))
   return c.json({ ok: true, rebaselineSuggested: !!warn })
+})
+org.post("/:orgId/gis-ai", async (c) => {
+  const id = oid(c); (await assertOrg(c, id))
+  const key = CONFIG.GEMINI_API_KEY
+  if (!key) return c.json({ fallback: true })
+  const { dataUrl, center, landM2 } = await c.req.json()
+  const m = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(String(dataUrl ?? ""))
+  if (!m) return c.json({ fallback: true })
+  const scale = Math.min(1.35, Math.max(0.75, Math.sqrt((Number(landM2) || 12000) / 12000)))
+  const lat0 = Number(center?.lat) || -7.2321, lng0 = Number(center?.lng) || 111.7792
+  const ll = (x: number, y: number): [number, number] => [
+    Number((lat0 + (y * scale) / 110540).toFixed(6)),
+    Number((lng0 + (x * scale) / (111320 * Math.cos((lat0 * Math.PI) / 180))).toFixed(6)),
+  ]
+  try {
+    const prompt = `Analisis gambar denah/citra satelit sekolah ini dan ubah menjadi fitur GIS vektor dalam koordinat meter lokal relatif pusat lahan: x dari -60 (Barat/kiri) sampai +60 (Timur/kanan), y dari -50 (Selatan/bawah) sampai +50 (Utara/atas). Kembalikan JSON murni dengan format: {"features":[{"type":"boundary"|"building"|"field"|"garden"|"parking"|"path"|"water"|"gate","name":"nama singkat Bahasa Indonesia","pts":[[x,y],...]}]}. Wajib ada 1 boundary (4 titik mengelilingi lahan), gedung-gedung (building, 4 titik persegi panjang tiap gedung), lapangan (field), kebun/taman (garden), parkir (parking), jalur jalan (path, 2-4 titik), dan 1 gerbang (gate, 1 titik).`
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: m[1], data: m[2] } }] }],
+        generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
+      }),
+    })
+    if (!res.ok) return c.json({ fallback: true })
+    const out: any = await res.json()
+    const raw = JSON.parse(out?.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}")
+    const valid = new Set(["boundary", "building", "field", "garden", "parking", "path", "water", "gate"])
+    const features = (Array.isArray(raw.features) ? raw.features : [])
+      .filter((f: any) => valid.has(f?.type) && Array.isArray(f?.pts) && f.pts.length >= (f.type === "gate" ? 1 : f.type === "path" ? 2 : 3))
+      .map((f: any) => ({ type: f.type, name: f.name ? String(f.name) : undefined, coords: f.pts.map(([x, y]: [number, number]) => ll(Number(x) || 0, Number(y) || 0)) }))
+    if (features.length < 3) return c.json({ fallback: true })
+    return c.json({ features, mode: "ai-server" })
+  } catch {
+    return c.json({ fallback: true })
+  }
 })
 
 // ---------------- kalender akademik (ENG-10) ----------------

@@ -15,6 +15,7 @@ import { footprint } from "./routes/footprint"
 import { crud } from "./routes/crud"
 import { runDailyJob, runSlaEscalation } from "./engine/services"
 import { WIB_OFFSET_MS } from "./lib"
+import { CONFIG } from "./config"
 
 // seed otomatis saat DB kosong
 if (!(await q.get("SELECT 1 FROM organizations LIMIT 1"))) {
@@ -22,8 +23,8 @@ if (!(await q.get("SELECT 1 FROM organizations LIMIT 1"))) {
   await import("./seed")
 }
 // Pengembangan: akun demo tanpa kata sandi diberi kata sandi demo (atur DEMO_PASSWORD; dimatikan saat NODE_ENV=production)
-if (process.env.NODE_ENV !== "production") {
-  const demoPw = process.env.DEMO_PASSWORD ?? "lestari123"
+if (!CONFIG.IS_PROD) {
+  const demoPw = CONFIG.DEMO_PASSWORD
   const empty = await q.all<{ id: number }>("SELECT id FROM users WHERE password_hash IS NULL")
   if (empty.length) {
     const h = await Bun.password.hash(demoPw)
@@ -80,21 +81,21 @@ app.onError((err, c) => {
 //   ANDROID_PACKAGE=id.sekolahlestari.petugas
 //   ANDROID_SHA256=AA:BB:…   (sidik jari kunci penandatangan; boleh beberapa, pisahkan koma — mis. kunci lokal + kunci Play Console)
 app.get("/.well-known/assetlinks.json", (c) => {
-  const pkg = process.env.ANDROID_PACKAGE
-  const prints = (process.env.ANDROID_SHA256 ?? "").split(",").map((s) => s.trim().toUpperCase()).filter(Boolean)
+  const pkg = CONFIG.ANDROID_PACKAGE
+  const prints = CONFIG.ANDROID_SHA256
   if (!pkg || !prints.length) return c.json([])
   return c.json([{ relation: ["delegate_permission/common.handle_all_urls"], target: { namespace: "android_app", package_name: pkg, sha256_cert_fingerprints: prints } }])
 })
 
 // Sajikan tiga aplikasi web sesuai domain (monorepo apps/*):
 //   domain utama → apps/web · admin.<domain> → apps/admin · petugas.<domain> → apps/petugas
-// Nama host bisa ditetapkan pasti lewat .env: ADMIN_HOST=admin.sekolahlestari.id, FIELD_HOST=petugas.sekolahlestari.id
+// Nama host bisa ditetapkan pasti lewat config.ts / .env: ADMIN_HOST=admin.sekolahlestari.id, FIELD_HOST=petugas.sekolahlestari.id
 const APPS_DIR = new URL("../../apps/", import.meta.url).pathname
 type AppKind = "web" | "admin" | "petugas"
 function appOfHost(host = ""): AppKind {
   const h = host.split(":")[0].toLowerCase()
-  if (process.env.ADMIN_HOST && h === process.env.ADMIN_HOST.toLowerCase()) return "admin"
-  if (process.env.FIELD_HOST && h === process.env.FIELD_HOST.toLowerCase()) return "petugas"
+  if (CONFIG.ADMIN_HOST && h === CONFIG.ADMIN_HOST) return "admin"
+  if (CONFIG.FIELD_HOST && h === CONFIG.FIELD_HOST) return "petugas"
   if (h.startsWith("admin.")) return "admin"
   if (h.startsWith("petugas.")) return "petugas"
   return "web"
@@ -151,6 +152,6 @@ setTimeout(async () => {
   catch (e) { console.error("[ALERT] migrasi komponen sampah baseline gagal", e) }
 }, 3000)
 
-const port = Number(process.env.PORT ?? 3000)
+const port = CONFIG.PORT
 console.log(`🌳 Sekolah Lestari API berjalan di http://localhost:${port}`)
 export default { port, fetch: app.fetch }

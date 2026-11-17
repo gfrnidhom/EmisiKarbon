@@ -3,10 +3,11 @@ import type { Context, MiddlewareHandler } from "hono"
 import { HTTPException } from "hono/http-exception"
 import { sign, verify } from "hono/jwt"
 import { q, json } from "./db"
+import { CONFIG } from "./config"
 
-export const SECRET = process.env.JWT_SECRET ?? "dev-jejakhijau-secret-ganti-di-produksi"
-export const QR_SECRET = process.env.QR_SECRET ?? "dev-qr-hmac-secret"
-export const DEV_SHOW_OTP = process.env.DEV_SHOW_OTP !== "false"
+export const SECRET = CONFIG.JWT_SECRET
+export const QR_SECRET = CONFIG.QR_SECRET
+export const DEV_SHOW_OTP = CONFIG.DEV_SHOW_OTP
 
 /** admin · operator (input & ACC data petugas) · kepsek (lihat saja) · petugas (petugas monitoring) · user (pengguna umum) */
 export type Role = "admin" | "operator" | "kepsek" | "petugas" | "user"
@@ -42,17 +43,17 @@ export const sha256 = (data: string | Uint8Array | ArrayBuffer) =>
   createHash("sha256").update(data instanceof ArrayBuffer ? new Uint8Array(data) : data).digest("hex")
 
 // ---------------- QR ber-HMAC (TREE-01, NFR-07) ----------------
-export const qrSign = (code: string) => createHmac("sha256", QR_SECRET).update(code).digest("base64url").slice(0, 12)
+export const qrSign = (code: string) => createHmac("sha256", CONFIG.QR_SECRET).update(code).digest("base64url").slice(0, 12)
 export const qrVerify = (code: string, sig: string) => !!sig && qrSign(code) === sig
 
 // ---------------- OTP & token (AUTH-01) ----------------
-export const hashOtp = (email: string, code: string) => sha256(`${email}:${code}:${SECRET}`)
+export const hashOtp = (email: string, code: string) => sha256(`${email}:${code}:${CONFIG.JWT_SECRET}`)
 export const newOtp = () => String(randomInt(0, 1_000_000)).padStart(6, "0")
 export const randomToken = (n = 24) => randomBytes(n).toString("base64url")
 
 export async function issueTokens(userId: number) {
   const now = Math.floor(Date.now() / 1000)
-  const access = await sign({ sub: userId, iat: now, exp: now + 60 * 60 * 8 }, SECRET, "HS256")
+  const access = await sign({ sub: userId, iat: now, exp: now + 60 * 60 * 8 }, CONFIG.JWT_SECRET, "HS256")
   const refresh = randomToken(32)
   ;(await q.run("INSERT INTO refresh_tokens(token, user_id, expires_at) VALUES (?, ?, ?)", refresh, userId, now + 60 * 60 * 24 * 30))
   return { access, refresh }
@@ -77,7 +78,7 @@ export const requireAuth: MiddlewareHandler = async (c, next) => {
   const h = c.req.header("Authorization") ?? (qt ? `Bearer ${qt}` : undefined)
   if (!h?.startsWith("Bearer ")) throw new HTTPException(401, { message: "Belum masuk" })
   try {
-    const p = await verify(h.slice(7), SECRET, "HS256")
+    const p = await verify(h.slice(7), CONFIG.JWT_SECRET, "HS256")
     const u = (await loadUser(Number(p.sub)))
     if (!u) throw new Error()
     c.set("user", u)

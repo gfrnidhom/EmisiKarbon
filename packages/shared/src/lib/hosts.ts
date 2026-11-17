@@ -1,28 +1,19 @@
 import type { NavigateFunction } from "react-router-dom"
 import { api } from "./api"
 import type { Me } from "./auth"
+import { CLIENT_CONFIG, type AppKind } from "./config"
 
-/** Tiga aplikasi dalam monorepo, masing-masing di domainnya sendiri:
- *  web     → domain utama (beranda, publik, pengguna umum)
- *  admin   → admin.<domain> (Admin, Operator, Kepala Sekolah)
- *  petugas → petugas.<domain> (aplikasi ponsel Petugas Monitoring, dibungkus APK) */
-export type AppKind = "web" | "admin" | "petugas"
+export type { AppKind }
 export const APP: AppKind = typeof __APP__ !== "undefined" ? __APP__ : "web"
-
-const DEV_PORT: Record<AppKind, number> = { web: 5173, admin: 5174, petugas: 5175 }
-const PREFIX: Record<AppKind, string> = { web: "", admin: "admin.", petugas: "petugas." }
-const ENV_URL: Record<AppKind, string | undefined> = {
-  web: import.meta.env.VITE_URL_WEB, admin: import.meta.env.VITE_URL_ADMIN, petugas: import.meta.env.VITE_URL_PETUGAS,
-}
 
 /** Alamat lengkap aplikasi lain. Urutan: VITE_URL_* → port Vite (pengembangan) → awalan subdomain pada host sekarang. */
 export function appUrl(kind: AppKind, path = "/") {
-  const fixed = ENV_URL[kind]
+  const fixed = CLIENT_CONFIG.APP_URL[kind]
   if (fixed) return fixed.replace(/\/$/, "") + path
   const { protocol, hostname, port } = window.location
-  if (import.meta.env.DEV) return `${protocol}//${hostname}:${DEV_PORT[kind]}${path}`
+  if (CLIENT_CONFIG.IS_DEV) return `${protocol}//${hostname}:${CLIENT_CONFIG.DEV_PORT[kind]}${path}`
   const base = hostname.replace(/^(admin|petugas)\./, "")
-  return `${protocol}//${PREFIX[kind]}${base}${port ? `:${port}` : ""}${path}`
+  return `${protocol}//${CLIENT_CONFIG.SUBDOMAIN_PREFIX[kind]}${base}${port ? `:${port}` : ""}${path}`
 }
 
 const STAFF = ["admin", "operator", "kepsek"]

@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Field, PageHeader, PageSkeleton, SimpleSelect, Spinner } from "@/components/common"
 import { appUrl } from "@/lib/hosts"
 import { PendingInvites } from "@/components/pending-invites"
+import { AdminEnvConfigCard } from "@/components/admin-env-config"
 import { api } from "@/lib/api"
 import { ROLE_LABEL } from "@/lib/auth"
 import { useOrg } from "@/lib/hooks"
@@ -101,6 +102,7 @@ export default function SettingsPage() {
         </div>
       </div>
       {can("operator", "kepsek", "admin") && <PendingInvites orgId={orgId} canManage={can("operator", "admin")} />}
+      {can("admin") && <AdminEnvConfigCard />}
     </div>
   )
 }
