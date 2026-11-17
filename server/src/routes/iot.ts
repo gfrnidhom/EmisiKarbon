@@ -234,9 +234,12 @@ export async function syncDemoIot(orgId = 1) {
     }
 
     await q.run(
-      "UPDATE iot_devices SET last_seen_at = ?, paired_at = COALESCE(paired_at, '2026-09-30 02:00:00'), last_ip = COALESCE(last_ip, '192.168.1.40'), firmware = COALESCE(firmware, 'ESP32-PZEM004T v1.2'), rssi = COALESCE(rssi, -58), battery = COALESCE(battery, 100), category = 'listrik_pln', status = 'aktif', interval_sec = COALESCE(interval_sec, 300) WHERE id = ?",
-      nowStr, dev.id
+      "UPDATE iot_devices SET paired_at = COALESCE(paired_at, '2026-09-30 02:00:00'), last_ip = COALESCE(last_ip, '192.168.1.40'), firmware = COALESCE(firmware, 'ESP32-PZEM004T v1.2'), rssi = COALESCE(rssi, -58), battery = COALESCE(battery, 100), category = 'listrik_pln', status = 'aktif', interval_sec = COALESCE(interval_sec, 300) WHERE id = ?",
+      dev.id
     )
+    if (!dev.last_seen_at) {
+      await q.run("UPDATE iot_devices SET last_seen_at = ? WHERE id = ?", nowStr, dev.id)
+    }
     await markDirty(dev.org_id)
   } catch (err) {
     console.error("Gagal sinkronisasi demo iot:", err)
@@ -329,6 +332,54 @@ iot.post("/iot/:id/test-reading", async (c) => {
   await markDirty(d.org_id)
   ;(await audit(c, "iot_test_reading", "iot_device", d.id, null, { value: val, at }))
   return c.json(await deviceView(await q.get("SELECT * FROM iot_devices WHERE id = ?", d.id)))
+})
+// Uji koneksi perangkat dari server: probe perangkat riil via IP/HTTP
+iot.post("/iot/:id/test-connection", async (c) => {
+  const d = (await q.get("SELECT * FROM iot_devices WHERE id = ?", (await rowId("iot_devices", c.req.param("id")))))
+  if (!d) throw bad("Perangkat tidak ditemukan", 404)
+  ;(await assertOrgRole(c, d.org_id, "operator", "admin"))
+
+  const now = nowUtc()
+  let isConnected = false
+  let failMsg = "Perangkat tidak merespon (timeout / tidak terjangkau)"
+
+  // Uji koneksi nyata ke perangkat IoT (bila memiliki IP lokal dan port HTTP)
+  if (d.last_ip && !d.last_ip.startsWith("127.") && d.last_ip !== "0.0.0.0") {
+    try {
+      const ctrl = new AbortController()
+      const t = setTimeout(() => ctrl.abort(), 1500)
+      const res = await fetch(`http://${d.last_ip}/ping`, { signal: ctrl.signal })
+      clearTimeout(t)
+      if (res.ok) isConnected = true
+    } catch (e: any) {
+      isConnected = false
+      failMsg = e?.name === "AbortError" ? "Waktu tunggu habis (timeout 1.5 detik)" : `Gagal menghubungi http://${d.last_ip}/ping`
+    }
+  }
+
+  if (isConnected) {
+    await q.run("UPDATE iot_devices SET last_seen_at = ? WHERE id = ?", now, d.id)
+    await q.run("INSERT INTO iot_heartbeats(device_id, at, kind, ip) VALUES (?,?,'ping_sukses',?)", d.id, now, d.last_ip)
+    await markDirty(d.org_id)
+    return c.json({
+      ok: true,
+      connected: true,
+      status: "terhubung",
+      message: "Perangkat IoT merespon dengan baik (Terhubung)",
+    })
+  } else {
+    // Tandai perangkat tidak terhubung: mundurkan last_seen_at lebih dari 6 jam (status menjadi 'terputus')
+    const disconnectedTime = addDays(todayWIB(), -1) + " 00:00:00"
+    await q.run("UPDATE iot_devices SET last_seen_at = ? WHERE id = ?", disconnectedTime, d.id)
+    await q.run("INSERT INTO iot_heartbeats(device_id, at, kind, ip) VALUES (?,?,'ping_gagal',?)", d.id, now, d.last_ip)
+    await markDirty(d.org_id)
+    return c.json({
+      ok: false,
+      connected: false,
+      status: "terputus",
+      message: `Perangkat IoT tidak merespon (${failMsg}). Status diubah menjadi Tidak Terhubung (Terputus).`,
+    })
+  }
 })
 iot.patch("/iot/:id", async (c) => {
   const d = (await q.get("SELECT * FROM iot_devices WHERE id = ?", (await rowId("iot_devices", c.req.param("id")))))

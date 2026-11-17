@@ -103,14 +103,25 @@ export default function Iot() {
     mutationFn: (b: any) => api(`/iot/${device.id}`, { method: "PATCH", json: b }),
     onSuccess: (_, b: any) => { if (b.rotate) toast.info(tl("Token diganti — perangkat lama terputus, pasangkan ulang lewat QR", "Token rotated — the old device is disconnected; pair again via QR")); refresh() },
   })
-  // Uji koneksi dari browser: mengirim heartbeat lewat endpoint publik yang sama dengan perangkat
+  // Uji koneksi ke perangkat IoT sebenarnya melalui server backend
   const testPing = useMutation({
     mutationFn: async () => {
-      const r = await fetch(`/api/public/iot/${device.token}/ping`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ firmware: "uji-browser" }) })
-      const j = await r.json(); if (!r.ok) throw new Error(j.error ?? r.statusText); return j
+      return await api<any>(`/iot/${device.id}/test-connection`, { method: "POST" })
     },
-    onSuccess: () => { toast.success(tl("Heartbeat uji diterima server", "Test heartbeat received")); refresh() },
-    onError: (e: Error) => toast.error(e.message),
+    onSuccess: (res: any) => {
+      if (res.connected) {
+        toast.success(tl("Perangkat IoT merespon — Terhubung", "IoT device responded — Connected"))
+      } else {
+        toast.error(tl(res.message ?? "Perangkat IoT tidak merespon — Status: Terputus", res.message ?? "IoT device did not respond — Disconnected"))
+      }
+      refresh()
+      qc.invalidateQueries({ queryKey: ["dashboard"] })
+      qc.invalidateQueries({ queryKey: ["trace-page"] })
+    },
+    onError: (e: Error) => {
+      toast.error(e.message)
+      refresh()
+    },
   })
   // Kirim data pembacaan uji langsung dari UI
   const sendTestReading = useMutation({
