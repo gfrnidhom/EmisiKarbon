@@ -2,7 +2,7 @@ import { useEffect, useMemo } from "react"
 import { SourceLabel } from "@/components/source-label"
 import { Link, useSearchParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
-import { CalendarDays, ChevronLeft, ChevronRight, Equal, ExternalLink, FileText, Info, Layers, Sigma, Trees, X as Times } from "lucide-react"
+import { ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, Equal, ExternalLink, FileText, Info, Layers, Sigma, Trees, X as Times, Zap } from "lucide-react"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -184,6 +184,59 @@ export default function TracePage() {
                   {s.basis?.text && <p className="mt-2 text-sm text-muted-foreground">{tl("Dasar data:", "Data basis:")} <b className="font-medium text-foreground">{s.basis.text}</b></p>}
                   {s.trace.note && <p className="mt-2 rounded-2xl bg-amber-500/10 px-4 py-2.5 text-sm text-amber-700 dark:text-amber-300">{s.trace.note}</p>}
                 </div>
+
+                {/* Data Khusus Sensor IoT Listrik PLN */}
+                {s.iot && (
+                  <div className="rounded-2xl border border-primary/25 bg-gradient-to-br from-emerald-500/10 via-primary/5 to-transparent p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3.5">
+                        <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
+                          <Zap className="size-5" />
+                        </span>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-foreground text-base">{s.iot.name}</span>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                              <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                              {tl("Terhubung", "Connected")}
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {s.iot.location ?? "Panel Listrik"} · {s.iot.firmware ?? "ESP32-PZEM004T"} {s.iot.rssi != null ? `· ${s.iot.rssi} dBm` : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <Link to="/app/iot" className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-background px-3 py-1.5 text-xs font-medium text-primary hover:bg-muted/50">
+                        {tl("Kelola Sensor IoT", "Manage IoT Sensor")} <ArrowUpRight className="size-3.5" />
+                      </Link>
+                    </div>
+
+                    {s.iot.lastReading && (
+                      <div className="mt-4 flex items-center justify-between rounded-xl bg-background/80 px-4 py-2.5 ring-1 ring-border/50 text-sm">
+                        <span className="text-muted-foreground">{tl("Angka meter kumulatif saat ini:", "Current cumulative meter reading:")}</span>
+                        <span className="font-mono text-base font-bold text-foreground tabular">{num(s.iot.lastReading.value, 1)} {s.iot.unit}</span>
+                      </div>
+                    )}
+
+                    <div className="mt-3.5 grid grid-cols-3 gap-3 text-center">
+                      <div className="rounded-xl border border-primary/25 bg-primary/10 p-3">
+                        <div className="text-xs font-medium text-primary uppercase tracking-wide">{tl("Hari ini", "Today")}</div>
+                        <div className="mt-1 text-lg font-bold tabular text-foreground">{num(s.iot.periods?.today?.value ?? 0, 1)} <span className="text-xs font-normal text-muted-foreground">{s.iot.unit}</span></div>
+                        <div className="mt-0.5 text-xs font-semibold text-primary tabular">{num(s.iot.periods?.today?.kg ?? 0, 1)} kg CO₂e</div>
+                      </div>
+                      <div className="rounded-xl bg-background/80 p-3 ring-1 ring-border/50">
+                        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{tl("Minggu ini", "This week")}</div>
+                        <div className="mt-1 text-lg font-bold tabular text-foreground">{num(s.iot.periods?.thisWeek?.value ?? 0, 1)} <span className="text-xs font-normal text-muted-foreground">{s.iot.unit}</span></div>
+                        <div className="mt-0.5 text-xs text-muted-foreground tabular">{num(s.iot.periods?.thisWeek?.kg ?? 0, 1)} kg CO₂e</div>
+                      </div>
+                      <div className="rounded-xl bg-background/80 p-3 ring-1 ring-border/50">
+                        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{tl("Bulan ini", "This month")}</div>
+                        <div className="mt-1 text-lg font-bold tabular text-foreground">{num(s.iot.periods?.thisMonth?.value ?? 0, 1)} <span className="text-xs font-normal text-muted-foreground">{s.iot.unit}</span></div>
+                        <div className="mt-0.5 text-xs text-muted-foreground tabular">{num(s.iot.periods?.thisMonth?.kg ?? 0, 1)} kg CO₂e</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-2xl bg-muted/50 p-4"><div className="text-xs text-muted-foreground">{tl("Ekspektasi baseline", "Baseline expectation")}</div><div className="mt-1 text-lg font-semibold tabular">{srcBase !== null ? `${num(srcBase, 2)} kg` : "–"}</div>{srcVsBase !== null && <div className={cn("text-xs font-medium", srcVsBase <= 0 ? "text-primary" : "text-amber-700 dark:text-amber-400")}>{signedPct(srcVsBase)}</div>}</div>
                   <div className="rounded-2xl bg-muted/50 p-4"><div className="text-xs text-muted-foreground">{tl("Hari sebelumnya", "Previous day")}</div><div className="mt-1 text-lg font-semibold tabular">{yesterday ? `${num(yesterday.sources[sel]?.kg ?? 0, 2)} kg` : "–"}</div></div>

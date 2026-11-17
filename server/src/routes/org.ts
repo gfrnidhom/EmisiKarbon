@@ -10,6 +10,7 @@ import { assetEco, closingInfo, dataStartDate, isLocked, markDirty, readDay, rea
 import { createTask, monitoringTasks, validateActivity, populationOf } from "../engine/services"
 import { SOURCE_META } from "../engine/factors"
 import { CONFIG } from "../config"
+import { devicePeriodStats, connectionStatus, syncDemoIot } from "./iot"
 
 export const org = new Hono()
 org.use("*", requireAuth)
@@ -110,6 +111,7 @@ org.put("/:orgId/calendar/:date", async (c) => {
 // ---------------- dasbor sekolah (REP-01) ----------------
 org.get("/:orgId/dashboard", async (c) => {
   const id = oid(c); (await assertOrg(c, id))
+  if (id === 1) await syncDemoIot(id)
   const today = c.req.query("date") ?? todayWIB()
   const ctx = (await loadContext(id))
   const days30 = (await readDays(id, addDays(today, -29), today, ctx))
@@ -160,6 +162,28 @@ org.get("/:orgId/dashboard", async (c) => {
     trees: { ...stock, absorbedMonth: absorbMonth.absorbed, releasedMonth: absorbMonth.released, absorbedToday: todayR.tree.absorbed, absorbedYesterday: yesterday?.tree.absorbed ?? 0, basis: treeBasis(trees, today) },
     avoided, confidence, strongShare: last30.strongShare,
     tasks: (await monitoringTasks(id)),
+    iotListrik: await (async () => {
+      const iotDev = await q.get(
+        "SELECT id, name, kind, unit, location, status, last_seen_at, rssi, battery, interval_sec, firmware, last_ip FROM iot_devices WHERE org_id = ? AND (category = 'listrik_pln' OR source = 'listrik') AND status = 'aktif' ORDER BY id LIMIT 1",
+        id
+      )
+      if (!iotDev) return null
+      const periods = await devicePeriodStats(iotDev.id, id, "listrik_pln")
+      const last = await q.get<{ at: string; value: number }>("SELECT at, value FROM iot_readings WHERE device_id = ? ORDER BY at DESC LIMIT 1", iotDev.id)
+      return {
+        id: iotDev.id,
+        name: iotDev.name,
+        location: iotDev.location,
+        unit: iotDev.unit ?? "kWh",
+        status: iotDev.status,
+        connection: connectionStatus(iotDev),
+        last_seen_at: iotDev.last_seen_at,
+        rssi: iotDev.rssi,
+        firmware: iotDev.firmware,
+        lastReading: last ? { at: last.at, value: last.value } : null,
+        periods,
+      }
+    })(),
   })
 })
 
@@ -184,7 +208,31 @@ org.get("/:orgId/trace", async (c) => {
       const ev = json<number[]>(rec.evidence_ids, [])
       return { ...parseJsonCols(rec, ["meta", "flags", "evidence_ids"]), evidence: ev.length ? (await q.all(`SELECT id, filename, sha256, mime FROM evidence WHERE id IN (${ev.join(",")})`)) : [] }
     }))).filter(Boolean)
-    out[k] = { ...s, meta: SOURCE_META[k], records: recs }
+    let iotInfo: any = null
+    if (k === "listrik") {
+      const iotDev = await q.get(
+        "SELECT id, name, kind, unit, location, status, last_seen_at, rssi, battery, interval_sec, firmware, last_ip FROM iot_devices WHERE org_id = ? AND (category = 'listrik_pln' OR source = 'listrik') AND status = 'aktif' ORDER BY id LIMIT 1",
+        id
+      )
+      if (iotDev) {
+        const periods = await devicePeriodStats(iotDev.id, id, "listrik_pln")
+        const last = await q.get<{ at: string; value: number }>("SELECT at, value FROM iot_readings WHERE device_id = ? ORDER BY at DESC LIMIT 1", iotDev.id)
+        iotInfo = {
+          id: iotDev.id,
+          name: iotDev.name,
+          location: iotDev.location,
+          unit: iotDev.unit ?? "kWh",
+          status: iotDev.status,
+          connection: connectionStatus(iotDev),
+          last_seen_at: iotDev.last_seen_at,
+          rssi: iotDev.rssi,
+          firmware: iotDev.firmware,
+          lastReading: last ? { at: last.at, value: last.value } : null,
+          periods,
+        }
+      }
+    }
+    out[k] = { ...s, meta: SOURCE_META[k], records: recs, iot: iotInfo }
   }
   const ratio = ctx.population / Math.max(ctx.baselinePopulation, 1)
   const baselineBySource = Object.fromEntries(Object.entries(ctx.baselineComp).map(([k, x]: [string, any]) => [k, (r.k > 0 ? x.daily_active_kg : x.daily_holiday_kg) * ratio]))

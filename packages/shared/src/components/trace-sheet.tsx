@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { SourceLabel } from "@/components/source-label"
 import { useQuery } from "@tanstack/react-query"
-import { ArrowUpRight, ChevronDown, FileText, Sigma, X as Times, Equal } from "lucide-react"
+import { ArrowUpRight, ChevronDown, FileText, Sigma, X as Times, Equal, Zap } from "lucide-react"
 import { Link } from "react-router-dom"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Badge } from "@/components/ui/badge"
@@ -129,6 +129,59 @@ export function TraceSheet({ orgId, date, source, open, onOpenChange }: { orgId:
                             {s.basis?.text && <p className="mt-2 text-xs text-muted-foreground">{tl("Dasar data:", "Data basis:")} <b className="font-medium text-foreground">{s.basis.text}</b></p>}
                             {s.trace.note && <p className="mt-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">{s.trace.note}</p>}
                           </div>
+
+                          {/* Data Khusus Pembacaan Sensor IoT Listrik PLN */}
+                          {s.iot && (
+                            <div className="rounded-2xl border border-primary/25 bg-gradient-to-br from-emerald-500/10 via-primary/5 to-transparent p-4">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex items-center gap-3">
+                                  <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+                                    <Zap className="size-4.5" />
+                                  </span>
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-semibold text-foreground text-sm">{s.iot.name}</span>
+                                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[0.625rem] font-semibold text-emerald-700 dark:text-emerald-300">
+                                        <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                        {tl("Terhubung", "Connected")}
+                                      </span>
+                                    </div>
+                                    <p className="truncate text-xs text-muted-foreground mt-0.5">
+                                      {s.iot.location ?? "Panel Listrik"} · {s.iot.firmware ?? "ESP32-PZEM004T"} {s.iot.rssi != null ? `· ${s.iot.rssi} dBm` : ""}
+                                    </p>
+                                  </div>
+                                </div>
+                                <Link to="/app/iot" onClick={() => onOpenChange(false)} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline shrink-0">
+                                  {tl("Kelola IoT", "Manage IoT")} <ArrowUpRight className="size-3" />
+                                </Link>
+                              </div>
+
+                              {s.iot.lastReading && (
+                                <div className="mt-3 flex items-center justify-between rounded-xl bg-background/80 px-3 py-2 ring-1 ring-border/50 text-xs">
+                                  <span className="text-muted-foreground">{tl("Angka meter kumulatif saat ini:", "Current cumulative meter reading:")}</span>
+                                  <span className="font-mono text-sm font-bold text-foreground tabular">{num(s.iot.lastReading.value, 1)} {s.iot.unit}</span>
+                                </div>
+                              )}
+
+                              <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                                <div className="rounded-xl border border-primary/25 bg-primary/10 p-2.5">
+                                  <div className="text-[0.625rem] font-medium text-primary uppercase tracking-wide">{tl("Hari ini", "Today")}</div>
+                                  <div className="mt-1 text-base font-bold tabular text-foreground">{num(s.iot.periods?.today?.value ?? 0, 1)} <span className="text-xs font-normal text-muted-foreground">{s.iot.unit}</span></div>
+                                  <div className="mt-0.5 text-[0.6875rem] font-semibold text-primary tabular">{num(s.iot.periods?.today?.kg ?? 0, 1)} kg CO₂e</div>
+                                </div>
+                                <div className="rounded-xl bg-background/80 p-2.5 ring-1 ring-border/50">
+                                  <div className="text-[0.625rem] font-medium text-muted-foreground uppercase tracking-wide">{tl("Minggu ini", "This week")}</div>
+                                  <div className="mt-1 text-base font-bold tabular text-foreground">{num(s.iot.periods?.thisWeek?.value ?? 0, 1)} <span className="text-xs font-normal text-muted-foreground">{s.iot.unit}</span></div>
+                                  <div className="mt-0.5 text-[0.6875rem] text-muted-foreground tabular">{num(s.iot.periods?.thisWeek?.kg ?? 0, 1)} kg CO₂e</div>
+                                </div>
+                                <div className="rounded-xl bg-background/80 p-2.5 ring-1 ring-border/50">
+                                  <div className="text-[0.625rem] font-medium text-muted-foreground uppercase tracking-wide">{tl("Bulan ini", "This month")}</div>
+                                  <div className="mt-1 text-base font-bold tabular text-foreground">{num(s.iot.periods?.thisMonth?.value ?? 0, 1)} <span className="text-xs font-normal text-muted-foreground">{s.iot.unit}</span></div>
+                                  <div className="mt-0.5 text-[0.6875rem] text-muted-foreground tabular">{num(s.iot.periods?.thisMonth?.kg ?? 0, 1)} kg CO₂e</div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
 
                           {/* faktor */}
                           {s.trace.factors.length > 0 && (
