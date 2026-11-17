@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { PeriodFilter, usePeriod } from "@/components/period-filter"
 import { createPortal } from "react-dom"
 import EcoReportPrint from "@/pages/print/eco-report"
@@ -14,8 +14,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Field, PageHeader, PageSkeleton, SimpleSelect, Spinner, StatCard, StatusBadge } from "@/components/common"
-import { Delta, hatch, PillBars, SegmentGauge, StatTile } from "@/components/dash-kit"
-import { CountUp } from "@/components/interactive-charts"
+import { hatch, PillBars, SegmentGauge } from "@/components/dash-kit"
+import { CarbonBalanceStats, MoreSection } from "@/components/carbon-balance"
 import { EditDialog, RowActions, usePerm } from "@/components/row-actions"
 import { AssetQrCard, useTreeCardPrint } from "@/components/tree-qr-card"
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
@@ -65,7 +65,7 @@ function LiveUptake({ perDay, trees, motor, date, partial }: { perDay: number; t
 }
 
 export default function Assets() {
-  const { orgId, can, org } = useOrg()
+  const { orgId, org } = useOrg()
   const qc = useQueryClient()
   const geo = useGeo()
   const [period, setPeriod] = usePeriod("yesterday")
@@ -102,16 +102,31 @@ export default function Assets() {
           <PeriodFilter value={period} onChange={setPeriod} />
           <Button size="lg" className="h-11" variant="outline" onClick={() => window.print()}><Printer /> {tl("Cetak / PDF", "Print / PDF")}</Button>
         </>} />
-      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile featured icon={Sprout} title={tr("Total emisi terhindar")} unit="kg CO₂e" value={<CountUp value={a.totalCo2e} format={(v) => num(v, 0)} />}
-          foot={<span className="text-[0.8125rem] text-white/80">{tr("CO₂e · kompos + bank kertas + PLTS")}</span>} />
-        <StatTile title={tr("Kompos")} icon={Recycle} unit="kg CO₂e" value={<CountUp value={a.kompos.co2e} format={(v) => num(v, 0)} />}
-          foot={<Delta value={`+${num(a.kompos.kg, 0)}`} good text={tl("kg sampah organik dikompos", "kg organic waste composted")} />} />
-        <StatTile title={tr("Bank sampah")} icon={Recycle} unit="kg CO₂e" value={<CountUp value={a.bankKertas.co2e} format={(v) => num(v, 0)} />}
-          foot={<Delta value={`+${num(a.bankKertas.kg, 0)}`} good text={tl(`kg kertas · ${num(a.bankMaterial.kg, 0)} kg plastik/logam`, `kg paper · ${num(a.bankMaterial.kg, 0)} kg plastic/metal`)} />} />
-        <StatTile title={tr("Panel surya")} icon={Sun} unit="kg CO₂e" value={<CountUp value={a.plts.co2e} format={(v) => num(v, 0)} />}
-          foot={<Delta value={`+${num(a.plts.kwh, 0)}`} good text={tl("kWh × faktor grid", "kWh × grid factor")} />} />
-      </div>
+
+      <CarbonBalanceStats org={org?.name} periodLabel={period.label} onTrees={() => nav("/app/trees")}
+        input={{ emissionKg: env.data.emission?.total ?? tree.daily.reduce((acc: number, x: any) => acc + (x.emission ?? 0), 0), days: period.days, treeCount: tree.count ?? 0, absorbedKg: tree.absorbed ?? null, bySource: env.data.emission?.bySource }} />
+
+      {/* emisi terhindar: satu kartu ringkas, angka dibaca dari kiri ke kanan */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-xl"><Recycle className="size-5 text-primary" />{tl("Emisi yang dihindari", "Emissions avoided")}</CardTitle>
+          <CardDescription>{tl("Emisi yang tidak jadi terlepas karena sampah diolah & listrik dari surya", "Emissions prevented by treating waste & using solar power")} · {period.label}</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            [Sprout, tl("Total", "Total"), a.totalCo2e, tl("kompos + bank sampah + PLTS", "compost + waste bank + solar"), true],
+            [Recycle, tl("Kompos", "Compost"), a.kompos.co2e, tl(`${num(a.kompos.kg, 0)} kg sampah organik diolah`, `${num(a.kompos.kg, 0)} kg organic waste composted`), false],
+            [Recycle, tl("Bank sampah", "Waste bank"), a.bankKertas.co2e, tl(`${num(a.bankKertas.kg, 0)} kg kertas · ${num(a.bankMaterial.kg, 0)} kg plastik/logam`, `${num(a.bankKertas.kg, 0)} kg paper · ${num(a.bankMaterial.kg, 0)} kg plastic/metal`), false],
+            [Sun, tl("Panel surya", "Solar panels"), a.plts.co2e, tl(`${num(a.plts.kwh, 0)} kWh listrik surya`, `${num(a.plts.kwh, 0)} kWh of solar power`), false],
+          ].map(([I, l, v, sub, main]: any) => (
+            <div key={l} className={cn("rounded-2xl px-4 py-3.5", main ? "bg-primary/10 ring-1 ring-primary/20" : "bg-muted/50")}>
+              <div className="flex items-center gap-1.5 text-sm text-muted-foreground"><I className="size-4 text-primary" />{l}</div>
+              <div className="mt-1 text-2xl font-semibold tabular">{num(v, 0)} <span className="text-sm font-normal text-muted-foreground">kg CO₂e</span></div>
+              <div className="mt-0.5 text-xs text-muted-foreground">{sub}</div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-5 lg:grid-cols-3">
         <LiveUptake perDay={todayUp?.absorbed ?? 0} trees={todayUp?.active ?? 0} motor={tree.motorFactor} date={todayUp?.date} partial={todayUp?.partial} />
@@ -140,6 +155,7 @@ export default function Assets() {
         </Card>
       </div>
 
+      <MoreSection title={tl("Rincian serapan pohon & emisi terhindar", "Tree uptake & avoided emissions details")}>
       <div className="grid gap-5 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
@@ -203,7 +219,7 @@ export default function Assets() {
           <StatCard label={tr("Biopori")} icon={Droplets} tone="scope3" value={<>{num(a.biopori.count)} <span className="text-base font-normal text-muted-foreground">{tr("lubang")}</span></>} sub={`${num(a.biopori.liters, 0)} L ${tr("kapasitas tampung")}`} />
         </div>
       </div>
-
+      </MoreSection>
 
       <Card>
         <CardHeader><CardTitle>{tr("Aset ber-QR")}</CardTitle><CardDescription>{tr("Scan membuka kartu aset sesuai jenis")}</CardDescription>

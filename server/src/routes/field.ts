@@ -345,7 +345,10 @@ field.get("/orgs/:orgId/environment", async (c) => {
     const y = treeAt(t, addDays(end, -1))
     if (y && st.stock > y.stock) bySpecies[k].daily += st.stock - y.stock
   }
-  return c.json({ start, end, avoided, rainfall, plts, dataStart: await dataStartDate(id),
+  // total emisi periode (dari buku engine) — untuk neraca karbon (emisi vs serapan pohon) di halaman Jasa Lingkungan
+  const emission = { total: days.reduce((s, d) => s + d.total, 0), days: days.length, bySource: {} as Record<string, number> }
+  for (const d of days) for (const [k, v] of Object.entries<any>(d.sources ?? {})) emission.bySource[k] = (emission.bySource[k] ?? 0) + (v?.kg ?? 0)
+  return c.json({ start, end, avoided, rainfall, plts, emission, dataStart: await dataStartDate(id),
     trees: { ...eco.trees, months, daily: dailyRows, motorFactor: motor, species: Object.values(bySpecies).sort((x, y) => y.stock - x.stock) } })
 })
 field.put("/orgs/:orgId/rainfall/:period", async (c) => {

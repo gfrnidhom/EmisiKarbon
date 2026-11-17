@@ -17,6 +17,7 @@ import { ScopeHeading } from "@/components/scope-group"
 import { t, tl } from "@/lib/i18n"
 import { CountUp, EmissionExplorer, type ExplorerMode } from "@/components/interactive-charts"
 import { PeriodFilter, usePeriod } from "@/components/period-filter"
+import { carbonBalance, InsightBar, MoreSection } from "@/components/carbon-balance"
 
 
 /** Rapor Karbon: Scope 1·2·3 per bulan vs ekspektasi baseline, rincian per sumber. */
@@ -35,6 +36,8 @@ export default function Carbon() {
   const [cmode, setCmode] = useState<ExplorerMode>("scope")
   const [ctype, setCtype] = useState<"bar" | "area">("bar")
   const [cbase, setCbase] = useState(true)
+  // serapan pohon periode yang sama (cache dibagi dengan halaman Jasa Lingkungan)
+  const env = useQuery({ queryKey: ["env", orgId, period.start, period.end], queryFn: () => api<any>(`/orgs/${orgId}/environment?start=${period.start}&end=${period.end}`), enabled: !!orgId, placeholderData: (p) => p })
   const rows = data?.months ?? []
   const cur = rows.find((r: any) => r.month === sel) ?? rows[rows.length - 1]
   const total = rows.reduce((s: number, r: any) => s + r.total, 0)
@@ -43,10 +46,7 @@ export default function Carbon() {
   if (isLoading) return <PageSkeleton />
   if (error) return <ErrorState error={error} />
   const sources = cur ? Object.entries<number>(cur.sources).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]) : []
-  const strong = cur ? ((cur.labels.terverifikasi ?? 0) + (cur.labels.aktual ?? 0) + (cur.labels.terukur ?? 0)) / Math.max(cur.total, 1) : 0
   const delta = base ? total / base - 1 : null
-  const prev = cur ? rows[rows.findIndex((r: any) => r.month === cur.month) - 1] : null
-  const curDelta = cur && !cur.partial && prev?.total ? cur.total / prev.total - 1 : null
   const intChange = cur && data.baseline?.perPersonActiveDay ? cur.perPersonActiveDay / data.baseline.perPersonActiveDay - 1 : null
   const quality = (() => {
     let strongK = 0, mid = 0, proj = 0
@@ -58,6 +58,13 @@ export default function Carbon() {
     const tot = strongK + mid + proj || 1
     return { strong: strongK / tot, mid: mid / tot, proj: proj / tot }
   })()
+  const periodSources: Record<string, number> = {}
+  for (const r of rows) for (const [k, v] of Object.entries<number>(r.sources ?? {})) periodSources[k] = (periodSources[k] ?? 0) + v
+  const totU = total >= 1000 ? "t" : "kg"
+  const perDay = total / Math.max(period.days, 1)
+  const motor = env.data?.trees?.motorFactor ?? 0
+  const topSrc = Object.entries(periodSources).filter(([, v]) => v > 0).sort((x, y) => y[1] - x[1])[0]
+  const balance = carbonBalance({ emissionKg: total, days: period.days, treeCount: env.data?.trees?.count ?? 0, absorbedKg: env.data?.trees?.absorbed ?? null, bySource: periodSources })
   const monthLabel = (m: string) => (m.length > 7 ? fmtDate(m, { day: "numeric", month: "short" }) : fmtDate(`${m}-01`, { month: "short" })).replace(".", "")
   return (
     <div className="space-y-5">
@@ -70,19 +77,28 @@ export default function Carbon() {
           <Button size="lg" className="h-11" variant="outline" onClick={() => window.print()}><Printer /> {tl("Cetak / PDF", "Print / PDF")}</Button>
         </>} />
 
+      {/* ---------- 4 statistik utama: jawab "berapa, rata-rata, dari mana, per orang" ---------- */}
       <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile featured title={`${tl("Total", "Total")} · ${period.label}`} unit="t CO₂e" value={<CountUp value={total / 1000} format={(v) => num(v, 2)} />}
-          foot={delta !== null ? <Delta invert value={signedPct(delta)} good={delta <= 0} text={tl("vs ekspektasi baseline", "vs baseline expectation")} /> : <span className="text-[0.8125rem] text-white/80">{data.feVersion}</span>} />
-        <StatTile title={cur ? rowLabel(cur.month) : "–"} unit="t CO₂e" value={<CountUp value={(cur?.total ?? 0) / 1000} format={(v) => num(v, 2)} />}
-          onClick={() => cur && nav(`/app/trace?date=${traceDate(cur)}`)}
-          foot={curDelta !== null ? <Delta value={signedPct(curDelta)} good={curDelta <= 0} text={daily ? tl("vs hari sebelumnya", "vs previous day") : tl("vs bulan sebelumnya", "vs previous month")} /> : <span className="text-[0.8125rem] text-muted-foreground">{t("{a} hari aktif dari {b} hari", { a: cur?.activeDays ?? 0, b: cur?.days ?? 0 })}</span>} />
-        <StatTile title={tl("Intensitas per orang", "Intensity per person")} unit={tl("kg/hari aktif", "kg/active day")} value={<CountUp value={cur?.perPersonActiveDay ?? 0} format={(v) => num(v, 3)} />}
-          foot={intChange !== null ? <Delta value={signedPct(intChange)} good={intChange <= 0} text={t("Baseline {n} kg", { n: num(data.baseline.perPersonActiveDay, 3) })} /> : <span className="text-[0.8125rem] text-muted-foreground">{t("Belum ada baseline")}</span>} />
-        <StatTile title={t("Porsi data kuat")} value={pct(strong)} foot={<span className="text-[0.8125rem] text-primary">{tl("Aktual · Terukur · Disahkan", "Actual · Measured · Approved")}</span>} />
+        <StatTile featured title={tl("Total emisi", "Total emissions")} unit={`${totU} CO₂e`}
+          value={<CountUp value={totU === "t" ? total / 1000 : total} format={(v) => num(v, totU === "t" ? 2 : 0)} />}
+          foot={delta !== null
+            ? <span className="text-[0.8125rem] text-white/85">{delta <= 0 ? tl(`${pct(-delta, 0)} lebih rendah dari perkiraan normal (baseline)`, `${pct(-delta, 0)} below the normal expectation (baseline)`) : tl(`${pct(delta, 0)} lebih tinggi dari perkiraan normal (baseline)`, `${pct(delta, 0)} above the normal expectation (baseline)`)}</span>
+            : <span className="text-[0.8125rem] text-white/80">{period.label} · {tl(`${period.days} hari`, `${period.days} days`)}</span>} />
+        <StatTile title={tl("Rata-rata per hari", "Daily average")} unit="kg CO₂e" onClick={() => cur && nav(`/app/trace?date=${traceDate(cur)}`)}
+          value={<CountUp value={perDay} format={(v) => num(v, perDay < 10 ? 2 : 0)} />}
+          foot={<span className="text-[0.8125rem] text-muted-foreground">{motor > 0 ? tl(`setara ±${num(perDay / motor, 0)} km naik motor setiap hari`, `like riding a motorbike ±${num(perDay / motor, 0)} km every day`) : tl(`${period.label} · ${period.days} hari`, `${period.label} · ${period.days} days`)}</span>} />
+        <StatTile title={tl("Sumber terbesar", "Largest source")} unit={topSrc ? tl("dari total", "of total") : ""} onClick={topSrc ? () => nav(`/app/trace?date=${cur ? traceDate(cur) : todayWIB()}&source=${topSrc[0]}`) : undefined}
+          value={topSrc ? <CountUp value={(topSrc[1] / Math.max(total, 1)) * 100} format={(v) => num(v, 0) + "%"} /> : "–"}
+          foot={<span className="text-[0.8125rem] text-muted-foreground">{topSrc ? <><b className="font-semibold text-foreground">{SOURCES[topSrc[0]]?.label ?? topSrc[0]}</b> · {kg(topSrc[1], 0)} · Scope {sourceScope(topSrc[0], org)}</> : tl("Belum ada emisi tercatat", "No emissions recorded yet")}</span>} />
+        <StatTile title={tl("Per orang per hari sekolah", "Per person per school day")} unit="kg CO₂e"
+          value={<CountUp value={cur?.perPersonActiveDay ?? 0} format={(v) => num(v, 3)} />}
+          foot={intChange !== null ? <Delta value={signedPct(intChange)} good={intChange <= 0} text={intChange <= 0 ? tl("lebih hemat dari baseline", "better than baseline") : tl("lebih boros dari baseline", "worse than baseline")} /> : <span className="text-[0.8125rem] text-muted-foreground">{t("Belum ada baseline")}</span>} />
       </div>
+      <InsightBar balance={balance} org={org?.name} periodLabel={period.label}
+        lead={<>{tl("Untuk mengimbangi emisi periode ini dibutuhkan", "Offsetting this period needs")} <b className="text-foreground">±{num(balance.needTrees)} {tl("pohon", "trees")}</b>{" "}({tl(`tercatat ${num(balance.treeCount)}`, `${num(balance.treeCount)} recorded`)}) · <Link to="/app/eco-services" className="font-medium text-primary hover:underline">{tl("lihat neraca di Jasa Lingkungan →", "see the balance in Eco Services →")}</Link></>} />
 
-      <div className="grid gap-5 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+      <div className="grid gap-5">
+        <Card>
           <CardHeader>
             <CardTitle className="text-xl">{daily ? tl("Emisi harian", "Daily emissions") : tl("Emisi bulanan", "Monthly emissions")}</CardTitle>
             <CardDescription>{daily ? tl("Klik batang untuk memilih hari · arsir = hari berjalan · paling gelap = tertinggi", "Click a bar to pick a day · hatched = today · darkest = highest") : tl("Klik batang untuk memilih bulan · arsir = bulan berjalan · paling gelap = tertinggi", "Click a bar to pick a month · hatched = in progress · darkest = highest")}</CardDescription>
@@ -90,18 +106,6 @@ export default function Carbon() {
           <CardContent className="pt-6">
             <PillBars height={250} selected={cur?.month} format={(v) => `${num(v / 1000, 2)} t`} onPick={(b) => setSel(b.key)}
               bars={rows.map((r: any) => ({ key: r.month, label: monthLabel(r.month), value: r.total, hatched: r.partial }))} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-xl">{tl("Kualitas data", "Data quality")}</CardTitle><CardDescription>{cur && rowLabel(cur.month)}</CardDescription></CardHeader>
-          <CardContent className="flex flex-1 flex-col justify-between gap-4">
-            <SegmentGauge value={pct(quality.strong)} label={tl("Data kuat", "Strong data")}
-              parts={[{ v: quality.strong, color: "var(--primary)" }, { v: quality.mid, color: "var(--primary-deep)" }, { v: quality.proj, color: "", hatched: true }]} />
-            <div className="flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm">
-              <span className="flex items-center gap-2"><span className="size-3.5 rounded-full bg-primary" />{tl("Kuat", "Strong")}</span>
-              <span className="flex items-center gap-2"><span className="size-3.5 rounded-full bg-primary-deep" />{tl("Input/estimasi", "Input/estimate")}</span>
-              <span className="flex items-center gap-2"><span className="size-3.5 rounded-full ring-1 ring-primary/30" style={hatch()} />{tl("Proyeksi", "Projected")} {pct(quality.proj)}</span>
-            </div>
           </CardContent>
         </Card>
       </div>
@@ -156,8 +160,9 @@ export default function Carbon() {
         </div>
       )}
 
-      <h2 className="pt-6 text-xl font-semibold tracking-tight">{tl("Analisis lanjutan", "Deeper analysis")}</h2>
-      <Card>
+      <MoreSection title={tl("Analisis lanjutan", "Deeper analysis")}>
+      <div className="grid gap-5 lg:grid-cols-3">
+      <Card className="lg:col-span-2">
         <CardHeader>
           <CardTitle>{daily ? tl("Emisi harian per scope", "Daily emissions by scope") : t("Emisi bulanan per scope")}</CardTitle>
           <CardDescription>{t("Klik batang untuk melihat rincian bulan · garis = ekspektasi baseline")}</CardDescription>
@@ -175,6 +180,20 @@ export default function Carbon() {
           <EmissionExplorer monthly={!daily} days={explorerRows} mode={cmode} chartType={ctype} showBaseline={cbase} showAverage={false} onPick={(m) => setSel(daily ? m.slice(0, 10) : m.slice(0, 7))} height={320} />
         </CardContent>
       </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-xl">{tl("Kualitas data", "Data quality")}</CardTitle><CardDescription>{cur && rowLabel(cur.month)}</CardDescription></CardHeader>
+          <CardContent className="flex flex-1 flex-col justify-between gap-4">
+            <SegmentGauge value={pct(quality.strong)} label={tl("Data kuat", "Strong data")}
+              parts={[{ v: quality.strong, color: "var(--primary)" }, { v: quality.mid, color: "var(--primary-deep)" }, { v: quality.proj, color: "", hatched: true }]} />
+            <div className="flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm">
+              <span className="flex items-center gap-2"><span className="size-3.5 rounded-full bg-primary" />{tl("Kuat", "Strong")}</span>
+              <span className="flex items-center gap-2"><span className="size-3.5 rounded-full bg-primary-deep" />{tl("Input/estimasi", "Input/estimate")}</span>
+              <span className="flex items-center gap-2"><span className="size-3.5 rounded-full ring-1 ring-primary/30" style={hatch()} />{tl("Proyeksi", "Projected")} {pct(quality.proj)}</span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+      </MoreSection>
     </div>
   )
 }

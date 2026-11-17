@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import {
-  ArrowDownRight, ArrowUpRight, BarChart3, Bike, CalendarDays, Droplets, FileText, Flame, Fuel, Gauge as GaugeIcon, Info, Layers, Leaf, LineChart, Mountain,
-  Pause, Plus, Recycle, RefreshCw, Sigma, Snowflake, Sparkles, Target, TriangleAlert, Zap, type LucideIcon,
+  BarChart3, CalendarDays, Flame, Gauge as GaugeIcon, Info, Layers, Leaf, LineChart, Mountain,
+  Pause, Plus, Recycle, RefreshCw, Sigma, Sparkles, Target, TriangleAlert,
 } from "lucide-react"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { CarbonBalanceStats, MoreSection } from "@/components/carbon-balance"
+import { PeriodFilter, usePeriod } from "@/components/period-filter"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorState, PageSkeleton } from "@/components/common"
@@ -16,35 +18,13 @@ import { TraceSheet } from "@/components/trace-sheet"
 import { api } from "@/lib/api"
 import { useOrg } from "@/lib/hooks"
 import { useAuth } from "@/lib/auth"
-import { addDays, fmtDate, kg, num, groupByScope, pct, signedPct, SOURCES, sourceScope, todayWIB, ton } from "@/lib/format"
+import { addDays, fmtDate, kg, num, groupByScope, pct, signedPct, SOURCES, todayWIB, ton } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { t as tr, tl, tServer } from "@/lib/i18n"
-import { Delta, hatch, PillBars, SegmentGauge, SRC_ICON, StatTile } from "@/components/dash-kit"
+import { t as tr, tl } from "@/lib/i18n"
+import { PillBars, SRC_ICON } from "@/components/dash-kit"
 import { ScopeHeading } from "@/components/scope-group"
 
 const RANGES = [{ v: "7", l: tl("7H", "7D") }, { v: "30", l: tl("30H", "30D") }, { v: "90", l: tl("90H", "90D") }, { v: "365", l: tl("1T", "1Y") }]
-/** Kartu gelap "langsung": jam WIB & hitung mundur pembaruan otomatis. */
-function LiveCard({ updatedAt, fetching, onRefresh, onTrace }: { updatedAt: number; fetching: boolean; onRefresh: () => void; onTrace: () => void }) {
-  const [now, setNow] = useState(Date.now())
-  useEffect(() => { const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id) }, [])
-  const clock = new Date(now).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).replace(/\./g, ":")
-  const left = Math.max(0, Math.ceil((updatedAt + 60_000 - now) / 1000))
-  return (
-    <div className="relative overflow-hidden rounded-2xl bg-primary-deep p-6 text-white">
-      <div className="pointer-events-none absolute inset-0 opacity-60" style={{ backgroundImage: "repeating-radial-gradient(circle at 110% 120%, transparent 0 14px, rgb(255 255 255 / 0.05) 14px 16px)" }} />
-      <div className="relative">
-        <div className="flex items-center justify-between"><span className="text-[1.0625rem] font-medium whitespace-nowrap">{tl("Pantauan", "Live")}</span><span className="flex items-center gap-1.5 text-xs text-white/70"><span className="size-2 animate-pulse rounded-full bg-emerald-300" />WIB</span></div>
-        <div className="mt-5 text-center text-[2.75rem] leading-none font-semibold tracking-tight tabular">{clock}</div>
-        <p className="mt-2 text-center text-xs text-white/70">{fetching ? tl("Memperbarui…", "Updating…") : tl(`Pembaruan otomatis dalam ${left} dtk`, `Auto-refresh in ${left}s`)}</p>
-        <div className="mt-5 flex justify-center gap-3">
-          <button onClick={onRefresh} aria-label={tl("Perbarui", "Refresh")} className="flex size-12 items-center justify-center rounded-full bg-white text-primary-deep transition-transform hover:scale-105">{fetching ? <Pause className="size-5" /> : <RefreshCw className="size-5" />}</button>
-          <button onClick={onTrace} aria-label={tl("Telusuri angka", "Trace numbers")} className="flex size-12 items-center justify-center rounded-full bg-amber-400 text-amber-950 transition-transform hover:scale-105"><Sigma className="size-5" /></button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export default function Dashboard() {
   const { orgId, me } = useAuth()
   const { org: orgInfo } = useOrg()
@@ -61,6 +41,12 @@ export default function Dashboard() {
   const [trace, setTrace] = useState<{ date: string; source?: string } | null>(null)
   const [barMode, setBarMode] = useState<"day" | "week">("day")
   const today = todayWIB()
+  // filter periode untuk statistik neraca karbon (Hari ini · Kemarin · 1 minggu · 1 bulan · 6 bulan · 1 tahun · Kustom)
+  const [period, setPeriod] = usePeriod("1m")
+  const bal = useQuery({
+    queryKey: ["env", orgId, period.start, period.end], enabled: !!orgId, placeholderData: (p) => p, refetchInterval: 60_000,
+    queryFn: () => api<any>(`/orgs/${orgId}/environment?start=${period.start}&end=${period.end}`),
+  })
   const series = useQuery({
     queryKey: ["series", orgId, range], enabled: !!orgId, placeholderData: (p) => p,
     queryFn: () => api<any>(`/orgs/${orgId}/series?start=${addDays(today, -Number(range) + 1)}&end=${today}`),
@@ -102,23 +88,7 @@ export default function Dashboard() {
 
   // hari ini masih berjalan → bandingkan dengan kemarin pada jam yang sama
   // kartu utama = kemarin (angka final), dibanding hari sebelumnya
-  const delta = d.yesterday && d.dayBefore?.total ? d.yesterday.total / d.dayBefore.total - 1 : null
-  const closedAt = d.closing?.lastClosedDate ? fmtDate(d.closing.lastClosedDate) : null
-  const intensityDown = (d.intensity.change ?? 0) < 0
-  // 6 sumber terbesar, ditampilkan berurutan Scope 1 → 2 → 3 (sama dengan halaman lain)
-  const sources = groupByScope(Object.entries<any>(d.month.bySource).map(([k, v]) => ({ k, kg: v.kg })).filter((x) => x.kg > 0).sort((a, b) => b.kg - a.kg).slice(0, 6), (x) => x.k, orgInfo).flatMap((g) => g.items)
-  const quality = (() => {
-    let strong = 0, mid = 0, proj = 0
-    for (const v of Object.values<any>(d.month.bySource)) for (const [l, kgv] of Object.entries<number>(v.labels ?? {})) {
-      if (["aktual", "terukur", "terverifikasi", "terkunci"].includes(l)) strong += kgv
-      else if (l === "proyeksi") proj += kgv
-      else mid += kgv
-    }
-    const tot = strong + mid + proj || 1
-    return { strong: strong / tot, mid: mid / tot, proj: proj / tot }
-  })()
   const vsRows = groupByScope(Object.entries<any>(d.vsBaseline).filter(([k]) => d.month.bySource[k]).sort((a, b) => (d.month.bySource[b[0]]?.kg ?? 0) - (d.month.bySource[a[0]]?.kg ?? 0)).slice(0, 5), ([k]) => k, orgInfo).flatMap((g) => g.items)
-  const task = d.tasks[0]
   const barTotal = bars.reduce((s, b) => s + b.value, 0)
 
   // ---- angka utama yang mudah dibaca ----
@@ -134,6 +104,11 @@ export default function Dashboard() {
   const envShare = d.month.total > 0 ? envMonth / d.month.total : 0
   const updated = new Date(dataUpdatedAt).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }).replace(".", ":")
   const monthSources = groupByScope(Object.entries<any>(d.month.bySource).map(([k, v]) => ({ k, kg: v.kg as number })).filter((x) => x.kg > 0), (x) => x.k, orgInfo)
+  // neraca karbon sesuai filter periode (angka dari buku engine)
+  const balanceInput = {
+    emissionKg: bal.data?.emission?.total ?? 0, days: period.days, treeCount: bal.data?.trees?.count ?? env.count,
+    absorbedKg: bal.data?.trees?.absorbed ?? null, bySource: bal.data?.emission?.bySource ?? {},
+  }
   const maxSrc = Math.max(...monthSources.flatMap((g) => g.items.map((x) => x.kg)), 1)
 
   return (
@@ -238,21 +213,16 @@ export default function Dashboard() {
         </section>
       </div>
 
-      {/* ---------- 2. ringkasan cepat ---------- */}
-      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile title={tl("Emisi bulan ini", "This month")} unit="t CO₂e" onClick={() => nav("/app/carbon")}
-          value={<CountUp value={d.month.total / 1000} format={(v) => num(v, 2)} />}
-          foot={<span className="text-[0.8125rem] text-muted-foreground">{tr("{a} hari aktif · data kuat {b}", { a: d.month.activeDays, b: pct(d.month.strongShare) })} · {tl("s.d. kemarin", "through yesterday")}</span>} />
-        <StatTile title={tl("Per orang per hari sekolah", "Per person per school day")} unit="kg CO₂e" onClick={() => nav("/app/carbon")}
-          value={<CountUp value={d.intensity.current} format={(v) => num(v, 3)} />}
-          foot={d.intensity.change !== null ? <Delta value={signedPct(d.intensity.change)} good={intensityDown} text={tl("dibanding baseline", "vs baseline")} /> : <span className="text-[0.8125rem] text-muted-foreground">{tr("Belum ada baseline")}</span>} />
-        <StatTile title={tl("Kualitas data", "Data quality")} unit={tl("data kuat", "strong data")} onClick={() => nav("/app/carbon")}
-          value={<CountUp value={quality.strong * 100} format={(v) => num(v, 0) + "%"} />}
-          foot={<span className="text-[0.8125rem] text-muted-foreground">{tl(`proyeksi ${pct(quality.proj)} · sisanya input/estimasi`, `projected ${pct(quality.proj)} · rest input/estimate`)}</span>} />
-        <StatTile title={tl("Tugas berikutnya", "Next task")} unit="" onClick={() => task && nav(task.link)}
-          value={<span className="line-clamp-2 text-xl leading-tight">{task ? tServer(task.title) : tl("Semua beres", "All done")}</span>}
-          foot={<span className={cn("text-[0.8125rem]", task?.status === "terlambat" ? "text-destructive" : "text-muted-foreground")}>{task ? `${task.status === "terlambat" ? tl("Terlambat · ", "Overdue · ") : ""}${tl("tenggat", "due")} ${fmtDate(task.due)}${d.tasks.length > 1 ? ` · +${d.tasks.length - 1}` : ""}` : tl("Tidak ada tugas jatuh tempo", "Nothing due")}</span>} />
-      </div>
+      {/* ---------- 2. statistik neraca karbon (bulan berjalan s.d. kemarin) ---------- */}
+      <CarbonBalanceStats input={balanceInput} org={d.org.name} onEmission={() => nav(`/app/carbon?range=${period.key}${period.key === "custom" ? `&from=${period.start}&to=${period.end}` : ""}`)} onTrees={() => nav("/app/eco-services")}
+        periodLabel={period.label} loading={bal.isFetching}
+        header={<>
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight">{tl("Rekap emisi & neraca karbon", "Emissions & carbon balance")}</h2>
+            <p className="text-sm text-muted-foreground">{period.start === period.end ? fmtDate(period.start) : `${fmtDate(period.start)} – ${fmtDate(period.end)}`}{period.end === today ? tl(" · hari ini masih sementara", " · today is provisional") : ""}</p>
+          </div>
+          <PeriodFilter value={period} onChange={setPeriod} />
+        </>} />
 
       {/* ---------- 3. dari mana emisinya + tren ---------- */}
       <div className="grid gap-5 xl:grid-cols-5">
@@ -298,7 +268,8 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      {/* ---------- 4. dibanding baseline ---------- */}
+      <MoreSection title={tl("Analisis lanjutan", "Deeper analysis")}>
+      {/* ---------- dibanding baseline ---------- */}
       {vsRows.length > 0 && d.baseline && (
         <Card>
           <CardHeader>
@@ -323,7 +294,6 @@ export default function Dashboard() {
         </Card>
       )}
 
-      <h2 className="pt-6 text-xl font-semibold tracking-tight">{tl("Analisis lanjutan", "Deeper analysis")}</h2>
       {/* ---------- penjelajah emisi + komposisi ---------- */}
       <div className="grid gap-5 xl:grid-cols-3">
         <Card className="xl:col-span-2">
@@ -416,20 +386,9 @@ export default function Dashboard() {
             </Gauge>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader><CardTitle className="flex items-center gap-2"><Leaf className="size-4 text-leaf" /> {tr("Emisi terhindar")}</CardTitle><CardDescription>{tr("Bulan ini · terpisah dari Rapor Karbon")}</CardDescription></CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <div className="text-3xl font-semibold tabular"><CountUp value={d.avoided.totalCo2e} format={(v) => num(v, 0)} /> <span className="text-sm font-normal text-muted-foreground">kg CO₂e</span></div>
-            {[["Kompos", d.avoided.kompos.co2e, "var(--leaf)"], ["Bank kertas", d.avoided.bankKertas.co2e, "var(--scope3)"], ["PLTS", d.avoided.plts.co2e, "var(--scope2)"]].map(([l, v, c]: any) => (
-              <div key={l}>
-                <div className="flex justify-between text-xs"><span className="text-muted-foreground">{tr(l)}</span><span className="font-medium tabular">{num(v, 0)} kg</span></div>
-                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full transition-all duration-700" style={{ width: `${d.avoided.totalCo2e ? (v / d.avoided.totalCo2e) * 100 : 0}%`, background: c }} /></div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
         </div>
       </div>
+      </MoreSection>
 
       <TraceSheet orgId={orgId} date={trace?.date ?? null} source={trace?.source} open={!!trace} onOpenChange={(o) => !o && setTrace(null)} />
     </div>
