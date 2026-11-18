@@ -169,8 +169,8 @@ export default function Dashboard() {
             )}
             <div className="mt-5 grid grid-cols-3 gap-2">
               {([1, 2, 3] as const).map((sc) => {
-                // bahasa awam; istilah scope tetap tampil kecil untuk yang membutuhkan
-                const L = [null, [tl("Bahan bakar & AC", "Fuel & AC"), "Scope 1"], [tl("Listrik", "Electricity"), "Scope 2"], [tl("Perjalanan, sampah, kertas", "Travel, waste, paper"), "Scope 3"]][sc]!
+                // nama baku GHG Protocol / ISO 14064-1; contoh sumber tampil kecil di bawah
+                const L = [null, [tl("Emisi Langsung", "Direct Emissions"), tl("Scope 1 · BBM, LPG, AC", "Scope 1 · fuel, LPG, AC")], [tl("Tidak Langsung Energi", "Indirect Energy"), tl("Scope 2 · Listrik PLN", "Scope 2 · grid power")], [tl("Tidak Langsung Lainnya", "Other Indirect"), tl("Scope 3 · perjalanan, sampah", "Scope 3 · travel, waste")]][sc]!
                 return (
                   <button key={sc} onClick={() => goToTrace(d.date, sc === 2 ? "listrik" : undefined)} className="cursor-pointer rounded-2xl bg-white/10 px-3 py-2.5 text-left transition-colors hover:bg-white/15">
                     <div className="flex items-start justify-between gap-1 text-[0.6875rem] text-white/70">

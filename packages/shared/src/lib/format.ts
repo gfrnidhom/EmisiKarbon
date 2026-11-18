@@ -33,9 +33,9 @@ export const sourceScope = (k: string, org?: { sanitation?: string | null } | nu
 /** Urutan baku sumber di semua halaman: Scope 1 (langsung) → Scope 2 (listrik) → Scope 3 (rantai nilai). */
 export const SOURCE_ORDER = ["lpg", "genset", "ac", "sampah_lokal", "air_limbah", "listrik", "mobilitas", "sampah", "kertas"]
 export const SCOPE_INFO: Record<1 | 2 | 3, { id: string; en: string; descId: string; descEn: string }> = {
-  1: { id: "Scope 1 · Langsung", en: "Scope 1 · Direct", descId: "Sumber milik sekolah: bahan bakar, refrigeran, sampah diolah di sekolah, tangki septik", descEn: "School-owned sources: fuel, refrigerants, on-site waste, septic tank" },
-  2: { id: "Scope 2 · Listrik", en: "Scope 2 · Electricity", descId: "Listrik PLN yang dibeli (location-based)", descEn: "Purchased grid electricity (location-based)" },
-  3: { id: "Scope 3 · Tidak langsung", en: "Scope 3 · Indirect", descId: "Rantai nilai: perjalanan warga, sampah ke TPA, kertas, air limbah ke luar sekolah", descEn: "Value chain: commuting, waste to landfill, paper, off-site wastewater" },
+  1: { id: "Scope 1 · Emisi Langsung", en: "Scope 1 · Direct Emissions", descId: "Sumber yang dimiliki/dikendalikan sekolah: pembakaran bahan bakar, refrigeran, sampah diolah di sekolah, tangki septik", descEn: "Sources owned or controlled by the school: fuel combustion, refrigerants, on-site waste, septic tank" },
+  2: { id: "Scope 2 · Emisi Tidak Langsung Energi", en: "Scope 2 · Indirect Energy Emissions", descId: "Listrik PLN yang dibeli dan dipakai sekolah (location-based)", descEn: "Purchased grid electricity consumed by the school (location-based)" },
+  3: { id: "Scope 3 · Emisi Tidak Langsung Lainnya", en: "Scope 3 · Other Indirect Emissions", descId: "Rantai nilai: perjalanan warga sekolah, sampah ke TPA, kertas, air limbah ke luar sekolah", descEn: "Value chain: commuting, waste to landfill, paper, off-site wastewater" },
 }
 /** Kelompokkan & urutkan sumber per scope (scope kosong dilewati). `scopeOf` boleh dari data (mis. hasil engine). */
 export function groupByScope<T>(items: T[], keyOf: (x: T) => string, org?: { sanitation?: string | null } | null, scopeOf?: (x: T) => number | undefined) {
@@ -45,4 +45,4 @@ export function groupByScope<T>(items: T[], keyOf: (x: T) => string, org?: { san
     items: items.filter((x) => (scopeOf?.(x) ?? sourceScope(keyOf(x), org)) === sc).sort((a, b) => rank(keyOf(a)) - rank(keyOf(b))),
   })).filter((g) => g.items.length)
 }
-export const SCOPE_LABEL = { 1: t("Scope 1 · Langsung"), 2: t("Scope 2 · Listrik"), 3: t("Scope 3 · Tidak langsung") } as const
+export const SCOPE_LABEL = { 1: t("Scope 1 · Emisi Langsung"), 2: t("Scope 2 · Emisi Tidak Langsung Energi"), 3: t("Scope 3 · Emisi Tidak Langsung Lainnya") } as const
