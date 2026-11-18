@@ -103,7 +103,15 @@ export default function Dashboard() {
     avoided: d.avoided?.totalCo2e ?? 0,
   }
   const envMonth = env.absorbedMonth + env.avoided
-  const envShare = d.month.total > 0 ? envMonth / d.month.total : 0
+  // kartu lingkungan = periode yang sama dengan kartu "Emisi hari ini" di sampingnya
+  const avoidedToday = d.ecoToday?.avoided?.totalCo2e ?? 0
+  const envToday = env.absorbedToday + avoidedToday
+  const envYesterday = d.ecoYesterday ? (d.ecoYesterday.trees?.absorbed ?? 0) + (d.ecoYesterday.avoided?.totalCo2e ?? 0) : null
+  const envShare = todayKg > 0 ? envToday / todayKg : 0
+  // rentang angka bulan ini = hari yang sudah ditutup (1 s.d. kemarin), sama dengan rekap emisi bulan ini
+  const dayNo = Number(String(d.date).slice(8, 10))
+  const monShort = new Date(`${d.date}T00:00:00+07:00`).toLocaleDateString(tl("id-ID", "en-GB"), { month: "short", timeZone: "Asia/Jakarta" })
+  const envRange = dayNo > 1 ? (dayNo === 2 ? `1 ${monShort}` : `1–${dayNo - 1} ${monShort}`) : null
   const updated = new Date(dataUpdatedAt).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }).replace(".", ":")
   const monthSources = groupByScope(Object.entries<any>(d.month.bySource).map(([k, v]) => ({ k, kg: v.kg as number })).filter((x) => x.kg > 0), (x) => x.k, orgInfo)
   // neraca karbon sesuai filter periode (angka dari buku engine)
@@ -122,7 +130,7 @@ export default function Dashboard() {
           <p className="mt-1.5 text-[0.9375rem] text-muted-foreground">{d.org.name} · {fmtDate(d.date, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
           {d.closing?.dataStart && <p className="mt-3 max-w-3xl text-base leading-relaxed text-foreground/85">
             {tl("Ringkasnya: hari ini sekolah sudah menghasilkan ", "In short: today the school has produced ")}<b>{num(todayKg, 0)} kg CO₂e</b>{todayKg > 0 ? tl(` (setara ±${num(todayKg / 0.082, 0)} km naik motor)`, ` (like riding a motorbike ±${num(todayKg / 0.082, 0)} km)`) : ""}.{" "}
-            {tl("Bulan ini pohon dan program hijau sekolah menyerap & menghemat ", "This month the school's trees and green programmes absorbed & saved ")}<b>{num(envMonth, 0)} kg CO₂e</b>.
+            {tl("Hari ini pohon dan program hijau sekolah menyerap & menghemat ", "Today the school's trees and green programmes absorbed & saved ")}<b>{num(envToday, envToday < 10 ? 1 : 0)} kg CO₂e</b>.
           </p>}
         </div>
         <div className="flex flex-wrap gap-2.5">
@@ -199,15 +207,15 @@ export default function Dashboard() {
               <Link to="/app/eco-services" className="text-xs font-medium text-emerald-700 hover:underline dark:text-emerald-300">{tl("Detail →", "Details →")}</Link>
             </div>
             <div className="mt-3">
-              <span className="text-[3.25rem] leading-none font-semibold tracking-tight text-emerald-900 tabular sm:text-[3.75rem] dark:text-emerald-100"><CountUp value={envMonth} format={(v) => num(v, 0)} /></span>
+              <span className="text-[3.25rem] leading-none font-semibold tracking-tight text-emerald-900 tabular sm:text-[3.75rem] dark:text-emerald-100"><CountUp value={envToday} format={(v) => num(v, envToday < 10 ? 1 : 0)} /></span>
               <span className="ml-2 text-lg text-emerald-800/70 dark:text-emerald-200/70">kg CO₂e</span>
             </div>
-            <p className="mt-2 text-sm text-emerald-900/70 dark:text-emerald-100/70">{tl("Diserap pohon + emisi yang dihindari bulan ini", "Absorbed by trees + emissions avoided this month")}</p>
+            <p className="mt-2 text-sm text-emerald-900/70 dark:text-emerald-100/70">{tl("Diserap pohon + emisi yang dihindari hari ini · sementara sampai tutup buku 00.30 WIB", "Absorbed by trees + emissions avoided today · provisional until the 00:30 WIB close")}</p>
             <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3">
               {[
-                [Leaf, tl("Serapan pohon", "Tree uptake"), `${num(env.absorbedMonth, 1)} kg`, tl(`hari ini ${num(env.absorbedToday, 2)} kg`, `today ${num(env.absorbedToday, 2)} kg`)],
+                [Leaf, tl("Serapan pohon", "Tree uptake"), `${num(env.absorbedToday, 2)} kg`, tl("hari ini", "today")],
+                [Recycle, tl("Emisi terhindar", "Avoided"), `${num(avoidedToday, avoidedToday < 10 ? 1 : 0)} kg`, tl("hari ini · kompos, bank sampah, PLTS", "today · compost, waste bank, solar")],
                 [Mountain, tl("Stok karbon pohon", "Tree carbon stock"), `${num(env.stock / 1000, 2)} t`, tl(`${num(env.count)} pohon terukur`, `${num(env.count)} trees measured`)],
-                [Recycle, tl("Emisi terhindar", "Avoided"), `${num(env.avoided, 0)} kg`, tl("kompos · bank sampah · PLTS", "compost · waste bank · solar")],
               ].map(([I, l, v, sub]: any) => (
                 <div key={l} className="rounded-2xl bg-white/70 px-3 py-2.5 dark:bg-white/5">
                   <div className="flex items-center gap-1.5 text-[0.6875rem] text-emerald-800/75 dark:text-emerald-200/75"><I className="size-3.5" />{l}</div>
@@ -218,9 +226,13 @@ export default function Dashboard() {
             </div>
             <div className="mt-4 border-t border-emerald-700/10 pt-4">
               <div className="flex items-center justify-between text-sm text-emerald-900/80 dark:text-emerald-100/80">
-                <span>{tl("Dibanding emisi bulan ini", "Compared with this month's emissions")}</span><b className="tabular">{pct(envShare, 1)}</b>
+                <span>{tl("Dibanding emisi hari ini", "Compared with today's emissions")}</span><b className="tabular">{pct(envShare, 1)}</b>
               </div>
               <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-emerald-900/10"><div className="h-full rounded-full bg-emerald-500 transition-all duration-700" style={{ width: `${Math.min(envShare, 1) * 100}%` }} /></div>
+              <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm text-emerald-900/75 dark:text-emerald-100/75">
+                <span>{tl("Kemarin (final)", "Yesterday (final)")} <b className="font-semibold text-emerald-950 dark:text-emerald-50">{envYesterday === null ? "—" : `${num(envYesterday, envYesterday < 10 ? 1 : 0)} kg`}</b></span>
+                {envRange && <span>{tl(`Bulan ini (${envRange})`, `This month (${envRange})`)} <b className="font-semibold text-emerald-950 dark:text-emerald-50">{num(envMonth, 0)} kg</b></span>}
+              </div>
               <p className="mt-2 text-[0.6875rem] text-emerald-900/60 dark:text-emerald-100/60">{tl(`Biopori ${num(d.avoided?.biopori?.count ?? 0)} lubang menampung ${num(d.avoided?.biopori?.liters ?? 0, 0)} L air. Estimasi internal — bukan kredit karbon dan tidak mengurangi angka emisi (Perpres 110/2025).`, `${num(d.avoided?.biopori?.count ?? 0)} biopores hold ${num(d.avoided?.biopori?.liters ?? 0, 0)} L of water. Internal estimate — not a carbon credit and not subtracted from emissions.`)}</p>
             </div>
           </div>

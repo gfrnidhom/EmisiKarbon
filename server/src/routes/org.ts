@@ -149,7 +149,8 @@ org.get("/:orgId/dashboard", async (c) => {
   }
   const curTotal = activeDays.length ? activeDays.reduce((s, d) => s + d.total, 0) / activeDays.length / Math.max(pop, 1) : 0
   const baseTotal = b ? Object.values(ctx.baselineComp).reduce((s, x) => s + x.daily_active_kg, 0) / Math.max(ctx.baselinePopulation, 1) : 0
-  const eco = sumEco(monthDays)
+  // sama dengan emisi bulan ini: hanya hari yang sudah ditutup (1 s.d. kemarin); hari ini tampil terpisah
+  const eco = sumEco(monthDays.filter((d) => !d.partial))
   const trees = (await loadTrees(id))
   const stock = { stock: todayR.tree.stock || days30.at(-1)?.tree.stock || 0, count: todayR.tree.count || days30.at(-1)?.tree.count || 0 }
   const absorbMonth = { absorbed: eco.trees.absorbed, released: eco.trees.released }
@@ -172,6 +173,8 @@ org.get("/:orgId/dashboard", async (c) => {
     vsBaseline, intensity: { current: curTotal, baseline: baseTotal, change: baseTotal ? curTotal / baseTotal - 1 : null },
     trees: { ...stock, absorbedMonth: absorbMonth.absorbed, releasedMonth: absorbMonth.released, absorbedToday: todayR.tree.absorbed, absorbedYesterday: yesterday?.tree.absorbed ?? 0, basis: treeBasis(trees, today) },
     avoided, confidence, strongShare: last30.strongShare,
+    // kartu "Karbon dari lingkungan" di samping "Emisi hari ini": angka hari ini (sementara) & kemarin (final)
+    ecoToday: sumEco(todayR.avoided ? [todayR] : []), ecoYesterday: yesterday ? sumEco([yesterday]) : null,
     tasks: (await monitoringTasks(id)),
     iotSources: await iotSources(id),
     iotListrik: await (async () => {
