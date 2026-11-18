@@ -4,6 +4,11 @@
  * oleh Admin melalui menu Pengaturan (disimpan di tabel `settings` dengan kunci `env_config`).
  */
 
+import { loadEnvFile } from "./env-file"
+
+// server/.env adalah sumber utama — dibaca eksplisit agar sama di mana pun server dijalankan
+// (mis. `cd server && bun src/index.ts` maupun `bun server/src/index.ts` dari folder akar).
+loadEnvFile()
 const env = process.env
 
 export interface EnvConfigOverride {
@@ -78,6 +83,20 @@ export function applyEnvConfig(patch?: EnvConfigOverride | null) {
   if (typeof patch.SIM_URL === "string" && patch.SIM_URL.trim()) CONFIG.SIM_URL = patch.SIM_URL.trim()
   if (typeof patch.JWT_SECRET === "string" && patch.JWT_SECRET.trim()) CONFIG.JWT_SECRET = patch.JWT_SECRET.trim()
   if (typeof patch.QR_SECRET === "string" && patch.QR_SECRET.trim()) CONFIG.QR_SECRET = patch.QR_SECRET.trim()
+}
+
+/** Waktu proses server dimulai & nilai yang sedang dipakai (untuk mendeteksi "perlu muat ulang"). */
+export const STARTED = { at: new Date().toISOString(), DATABASE_URL: CONFIG.DATABASE_URL, DB_PATH: CONFIG.DB_PATH, NODE_ENV: CONFIG.NODE_ENV, PORT: String(CONFIG.PORT) }
+
+/** Terapkan ulang nilai yang bisa langsung aktif dari process.env (setelah .env diubah dari UI). */
+export function reloadLiveConfig() {
+  const e = process.env
+  applyEnvConfig({
+    GEMINI_API_KEY: e.GEMINI_API_KEY ?? "", ADMIN_HOST: e.ADMIN_HOST ?? "", FIELD_HOST: e.FIELD_HOST ?? "",
+    ANDROID_PACKAGE: e.ANDROID_PACKAGE ?? "", ANDROID_SHA256: e.ANDROID_SHA256 ?? "",
+    ...(e.DEMO_PASSWORD ? { DEMO_PASSWORD: e.DEMO_PASSWORD } : {}), DEV_SHOW_OTP: e.DEV_SHOW_OTP !== "false",
+    ...(e.SIM_URL ? { SIM_URL: e.SIM_URL } : {}), ...(e.JWT_SECRET ? { JWT_SECRET: e.JWT_SECRET } : {}), ...(e.QR_SECRET ? { QR_SECRET: e.QR_SECRET } : {}),
+  })
 }
 
 /** Ringkasan konfigurasi yang dikirim ke halaman Pengaturan (khusus Admin). */

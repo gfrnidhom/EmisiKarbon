@@ -1,7 +1,6 @@
 // Konsol admin (ADM-*), pengelola program (REP-04, AUTH-04), dan halaman publik.
 import { Hono } from "hono"
 import { transaction, q, json, getSetting, setSetting } from "../db"
-import { applyEnvConfig, getEnvConfigView } from "../config"
 import { addDays, audit, bad, hasRole, qrVerify, requireAuth, requireRole, sha256, todayWIB, accessibleOrgIds, assertOrgRole, rolesInOrg } from "../lib"
 import { computeRange, loadContext, loadTrees, summarize, treeDaily, treeStock, treeAt, buildTree, feVersionSet, MODE_FACTOR } from "../engine/engine"
 import { closeDays, markDirty, readDays } from "../engine/ledger"
@@ -144,7 +143,6 @@ admin.get("/settings", async (c) => {
     sla_days: (await getSetting("sla_days", { rutin: 7, prioritas: 3, baseline: 14, perbaikan: 10 })),
     confidence_thresholds: (await getSetting("confidence_thresholds", { tinggi: 0.8, sedang: 0.4 })),
     last_daily_job: (await getSetting("last_daily_job", null)),
-    ...(isAdmin ? { env_config: getEnvConfigView() } : {}),
   })
 })
 admin.put("/settings", requireRole("admin"), async (c) => {
@@ -153,15 +151,7 @@ admin.put("/settings", requireRole("admin"), async (c) => {
     (await audit(c, "setting", "settings", k, (await getSetting(k, null)), b[k]))
     ;(await setSetting(k, b[k]))
   }
-  if (b.env_config && typeof b.env_config === "object") {
-    const prev = await getSetting<Record<string, any>>("env_config", {})
-    const next = { ...prev, ...b.env_config }
-    applyEnvConfig(next)
-    await setSetting("env_config", next)
-    const mask = (o: any) => o ? { ...o, GEMINI_API_KEY: o.GEMINI_API_KEY ? "***" : "", JWT_SECRET: o.JWT_SECRET ? "***" : "", QR_SECRET: o.QR_SECRET ? "***" : "" } : o
-    await audit(c, "setting", "settings", "env_config", mask(prev), mask(next))
-  }
-  return c.json({ ok: true, env_config: getEnvConfigView() })
+  return c.json({ ok: true })
 })
 
 // Tenant & pengguna

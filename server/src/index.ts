@@ -13,6 +13,7 @@ import { admin, program, pub } from "./routes/admin"
 import { iot, ingestIot, pairIot, pingIot } from "./routes/iot"
 import { footprint } from "./routes/footprint"
 import { crud } from "./routes/crud"
+import { envAdmin } from "./routes/env"
 import { runDailyJob, runSlaEscalation } from "./engine/services"
 import { WIB_OFFSET_MS } from "./lib"
 import { CONFIG } from "./config"
@@ -67,6 +68,7 @@ app.route("/api", field)
 app.route("/api", wf)
 app.route("/api", iot)
 app.route("/api", crud)
+app.route("/api/admin/env", envAdmin)
 app.route("/api/admin", admin)
 app.route("/api/program", program)
 
