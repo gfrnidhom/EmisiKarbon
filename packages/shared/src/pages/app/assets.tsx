@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { PeriodFilter, usePeriod } from "@/components/period-filter"
+import { PeriodFilter, periodPhrase, usePeriod } from "@/components/period-filter"
 import { createPortal } from "react-dom"
 import EcoReportPrint from "@/pages/print/eco-report"
 import { Link, useNavigate } from "react-router-dom"
@@ -102,6 +102,15 @@ export default function Assets() {
           <PeriodFilter value={period} onChange={setPeriod} />
           <Button size="lg" className="h-11" variant="outline" onClick={() => window.print()}><Printer /> {tl("Cetak / PDF", "Print / PDF")}</Button>
         </>} />
+
+      {/* ringkasan satu kalimat untuk pembaca awam */}
+      <p className="max-w-4xl rounded-2xl bg-emerald-500/8 px-5 py-4 text-base leading-relaxed text-foreground/90 ring-1 ring-emerald-500/20">
+        {tl("Ringkasnya: ", "In short: ")}{tl(`${num(tree.count ?? 0)} pohon sekolah menyimpan`, `${num(tree.count ?? 0)} school trees store`)} <b>{num((tree.stock ?? 0) / 1000, 2)} ton CO₂</b>
+        {tl(" dan menyerap ", " and absorbed ")}<b>{num(tree.absorbed ?? 0, 1)} kg CO₂</b>{" "}{periodPhrase(period)}.
+        {" "}{tl("Kompos, bank sampah, dan panel surya mencegah ", "Composting, the waste bank and solar panels prevented ")}<b>{num(a.totalCo2e, 0)} kg CO₂e</b>{tl(" terlepas", " of emissions")}.
+        {(a.biopori?.count ?? 0) > 0 && <> {tl(`${num(a.biopori.count)} lubang biopori menampung ${num(a.biopori.liters, 0)} liter air hujan.`, `${num(a.biopori.count)} biopores hold ${num(a.biopori.liters, 0)} litres of rainwater.`)}</>}
+        <span className="mt-1 block text-xs text-muted-foreground">{tl("Ini estimasi internal sekolah — bukan kredit karbon dan tidak mengurangi angka emisi di Rapor Karbon.", "Internal school estimate — not a carbon credit and not subtracted from the Carbon Report.")}</span>
+      </p>
 
       <CarbonBalanceStats org={org?.name} periodLabel={period.label} onTrees={() => nav("/app/trees")}
         input={{ emissionKg: env.data.emission?.total ?? tree.daily.reduce((acc: number, x: any) => acc + (x.emission ?? 0), 0), days: period.days, treeCount: tree.count ?? 0, absorbedKg: tree.absorbed ?? null, bySource: env.data.emission?.bySource }} />

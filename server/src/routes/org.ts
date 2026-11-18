@@ -10,7 +10,7 @@ import { assetEco, closingInfo, dataStartDate, isLocked, markDirty, readDay, rea
 import { createTask, monitoringTasks, validateActivity, populationOf } from "../engine/services"
 import { SOURCE_META } from "../engine/factors"
 import { CONFIG } from "../config"
-import { devicePeriodStats, connectionStatus, syncDemoIot } from "./iot"
+import { devicePeriodStats, connectionStatus, iotSources, syncDemoIot } from "./iot"
 
 export const org = new Hono()
 org.use("*", requireAuth)
@@ -162,6 +162,7 @@ org.get("/:orgId/dashboard", async (c) => {
     trees: { ...stock, absorbedMonth: absorbMonth.absorbed, releasedMonth: absorbMonth.released, absorbedToday: todayR.tree.absorbed, absorbedYesterday: yesterday?.tree.absorbed ?? 0, basis: treeBasis(trees, today) },
     avoided, confidence, strongShare: last30.strongShare,
     tasks: (await monitoringTasks(id)),
+    iotSources: await iotSources(id),
     iotListrik: await (async () => {
       const iotDev = await q.get(
         "SELECT id, name, kind, unit, location, status, last_seen_at, rssi, battery, interval_sec, firmware, last_ip FROM iot_devices WHERE org_id = ? AND (category = 'listrik_pln' OR source = 'listrik') AND status = 'aktif' ORDER BY id LIMIT 1",
@@ -303,7 +304,7 @@ org.get("/:orgId/monthly", async (c) => {
   }
   const rows = [...out.values()]
   const pop = Math.max(ctx.population, 1)
-  return c.json({
+  return c.json({ iotSources: await iotSources(id),
     baseline: ctx.baseline ? { version: ctx.baseline.version_label, status: ctx.baseline.status, perPersonActiveDay: Object.values(ctx.baselineComp).reduce((s: number, x: any) => s + x.daily_active_kg, 0) / Math.max(ctx.baselinePopulation, 1) } : null,
     population: ctx.population, feVersion: feVersionSet(ctx.fe),
     start, end, group,

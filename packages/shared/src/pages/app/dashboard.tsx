@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
 import { t as tr, tl } from "@/lib/i18n"
 import { PillBars, SRC_ICON } from "@/components/dash-kit"
 import { ScopeHeading } from "@/components/scope-group"
+import { IotBadge } from "@/components/iot-badge"
 
 const RANGES = [{ v: "7", l: tl("7H", "7D") }, { v: "30", l: tl("30H", "30D") }, { v: "90", l: tl("90H", "90D") }, { v: "365", l: tl("1T", "1Y") }]
 export default function Dashboard() {
@@ -119,6 +120,10 @@ export default function Dashboard() {
         <div>
           <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{tl("Dasbor", "Dashboard")}</h1>
           <p className="mt-1.5 text-[0.9375rem] text-muted-foreground">{d.org.name} · {fmtDate(d.date, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
+          {d.closing?.dataStart && <p className="mt-3 max-w-3xl text-base leading-relaxed text-foreground/85">
+            {tl("Ringkasnya: hari ini sekolah sudah menghasilkan ", "In short: today the school has produced ")}<b>{num(todayKg, 0)} kg CO₂e</b>{todayKg > 0 ? tl(` (setara ±${num(todayKg / 0.082, 0)} km naik motor)`, ` (like riding a motorbike ±${num(todayKg / 0.082, 0)} km)`) : ""}.{" "}
+            {tl("Bulan ini pohon dan program hijau sekolah menyerap & menghemat ", "This month the school's trees and green programmes absorbed & saved ")}<b>{num(envMonth, 0)} kg CO₂e</b>.
+          </p>}
         </div>
         <div className="flex flex-wrap gap-2.5">
           {canInput && <Button size="lg" className="h-11 px-5" render={<Link to="/app/input" />}><Plus /> {tl("Input data", "Add data")}</Button>}
@@ -164,14 +169,16 @@ export default function Dashboard() {
             )}
             <div className="mt-5 grid grid-cols-3 gap-2">
               {([1, 2, 3] as const).map((sc) => {
-                const isIotMeasured = sc === 2 && (d.today?.sources?.listrik?.label === "terukur" || d.iotListrik)
+                // bahasa awam; istilah scope tetap tampil kecil untuk yang membutuhkan
+                const L = [null, [tl("Bahan bakar & AC", "Fuel & AC"), "Scope 1"], [tl("Listrik", "Electricity"), "Scope 2"], [tl("Perjalanan, sampah, kertas", "Travel, waste, paper"), "Scope 3"]][sc]!
                 return (
-                  <button key={sc} onClick={() => goToTrace(d.date, sc === 2 ? "listrik" : undefined)} className="rounded-2xl bg-white/10 px-3 py-2.5 text-left transition-colors hover:bg-white/15 cursor-pointer">
-                    <div className="flex items-center justify-between text-[0.6875rem] text-white/65">
-                      <span>{tl(["", "Scope 1 · langsung", "Scope 2 · listrik", "Scope 3 · lainnya"][sc], ["", "Scope 1 · direct", "Scope 2 · power", "Scope 3 · other"][sc])}</span>
-                      {isIotMeasured && <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-400/25 px-1.5 py-0.2 text-[0.625rem] font-medium text-emerald-100">⚡ IoT</span>}
+                  <button key={sc} onClick={() => goToTrace(d.date, sc === 2 ? "listrik" : undefined)} className="cursor-pointer rounded-2xl bg-white/10 px-3 py-2.5 text-left transition-colors hover:bg-white/15">
+                    <div className="flex items-start justify-between gap-1 text-[0.6875rem] text-white/70">
+                      <span className="leading-tight">{L[0]}</span>
+                      {sc === 2 && <IotBadge dark source="listrik" iot={d.iotSources} />}
                     </div>
                     <div className="mt-0.5 font-semibold tabular">{num(d.today?.scope?.[sc] ?? 0, 0)} <span className="text-xs font-normal text-white/65">kg</span></div>
+                    <div className="text-[0.625rem] text-white/45">{L[1]}</div>
                   </button>
                 )
               })}
@@ -246,64 +253,27 @@ export default function Dashboard() {
                 <ScopeHeading compact scope={g.scope} totalKg={g.items.reduce((a, x) => a + x.kg, 0)} />
                 {g.items.map((x) => {
                   const I = SRC_ICON[x.k] ?? Leaf
-                  const isIot = x.k === "listrik" && (d.today?.sources?.listrik?.label === "terukur" || d.month?.sources?.listrik?.label === "terukur" || d.iotListrik)
                   return (
                     <div key={x.k} className="space-y-1">
                       <button onClick={() => goToTrace(d.date, x.k)} className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-muted/60">
                         <span className="flex size-9 shrink-0 items-center justify-center rounded-full" style={{ background: `color-mix(in srgb, ${SOURCES[x.k]?.color} 18%, transparent)`, color: SOURCES[x.k]?.color }}><I className="size-4" /></span>
                         <span className="w-40 shrink-0 truncate text-sm font-medium sm:w-52 flex items-center gap-1.5">
                           <span>{SOURCES[x.k]?.label ?? x.k}</span>
-                          {isIot && <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.2 text-[0.625rem] font-semibold text-emerald-700 ring-1 ring-emerald-500/25 dark:text-emerald-300">⚡ IoT</span>}
+                          <IotBadge source={x.k} iot={d.iotSources} />
                         </span>
                         <span className="h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full" style={{ width: `${(x.kg / maxSrc) * 100}%`, background: SOURCES[x.k]?.color }} /></span>
                         <span className="w-24 shrink-0 text-right text-sm font-semibold tabular">{x.kg >= 1000 ? `${num(x.kg / 1000, 2)} t` : `${num(x.kg, 0)} kg`}</span>
                         <span className="hidden w-12 shrink-0 text-right text-xs text-muted-foreground sm:inline">{pct(d.month.total ? x.kg / d.month.total : 0, 0)}</span>
                       </button>
 
-                      {/* Box data khusus dari sensor IoT Listrik PLN */}
+                      {/* ringkasan sensor IoT listrik: satu baris, detail di Telusuri */}
                       {x.k === "listrik" && d.iotListrik && (
-                        <div className="ml-11 mr-2 my-2 rounded-2xl border border-primary/25 bg-gradient-to-br from-emerald-500/10 via-primary/5 to-transparent p-3.5 text-xs">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <span className="flex size-6 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                                <Zap className="size-3.5" />
-                              </span>
-                              <span className="font-semibold text-foreground text-xs">{d.iotListrik.name}</span>
-                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[0.625rem] font-semibold text-emerald-700 dark:text-emerald-300">
-                                <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                {tl("Data Riil Sensor", "Real Sensor Data")}
-                              </span>
-                            </div>
-                            <button onClick={() => goToTrace(d.date, "listrik")} className="font-medium text-primary hover:underline inline-flex items-center gap-1">
-                              {tl("Detail perhitungan", "Calculation details")} <ArrowUpRight className="size-3" />
-                            </button>
-                          </div>
-
-                          {d.iotListrik.lastReading && (
-                            <div className="mt-2.5 flex items-center justify-between rounded-lg bg-background/80 px-2.5 py-1.5 ring-1 ring-border/40 text-[0.6875rem]">
-                              <span className="text-muted-foreground">{tl("Angka meter kumulatif saat ini:", "Current cumulative meter reading:")}</span>
-                              <span className="font-mono font-bold text-foreground tabular">{num(d.iotListrik.lastReading.value, 1)} {d.iotListrik.unit}</span>
-                            </div>
-                          )}
-
-                          <div className="mt-2.5 grid grid-cols-3 gap-2 text-center">
-                            <div className="rounded-xl border border-primary/25 bg-primary/10 p-2">
-                              <div className="text-[0.625rem] font-medium text-primary uppercase">{tl("Hari ini", "Today")}</div>
-                              <div className="mt-0.5 text-sm font-bold tabular text-foreground">{num(d.iotListrik.periods?.today?.value ?? 0, 1)} <span className="text-[0.625rem] font-normal text-muted-foreground">{d.iotListrik.unit}</span></div>
-                              <div className="text-[0.625rem] font-semibold text-primary tabular">{num(d.iotListrik.periods?.today?.kg ?? 0, 1)} kg CO₂e</div>
-                            </div>
-                            <div className="rounded-xl bg-background/80 p-2 ring-1 ring-border/40">
-                              <div className="text-[0.625rem] font-medium text-muted-foreground uppercase">{tl("Minggu ini", "This week")}</div>
-                              <div className="mt-0.5 text-sm font-bold tabular text-foreground">{num(d.iotListrik.periods?.thisWeek?.value ?? 0, 1)} <span className="text-[0.625rem] font-normal text-muted-foreground">{d.iotListrik.unit}</span></div>
-                              <div className="text-[0.625rem] text-muted-foreground tabular">{num(d.iotListrik.periods?.thisWeek?.kg ?? 0, 1)} kg CO₂e</div>
-                            </div>
-                            <div className="rounded-xl bg-background/80 p-2 ring-1 ring-border/40">
-                              <div className="text-[0.625rem] font-medium text-muted-foreground uppercase">{tl("Bulan ini", "This month")}</div>
-                              <div className="mt-0.5 text-sm font-bold tabular text-foreground">{num(d.iotListrik.periods?.thisMonth?.value ?? 0, 1)} <span className="text-[0.625rem] font-normal text-muted-foreground">{d.iotListrik.unit}</span></div>
-                              <div className="text-[0.625rem] text-muted-foreground tabular">{num(d.iotListrik.periods?.thisMonth?.kg ?? 0, 1)} kg CO₂e</div>
-                            </div>
-                          </div>
-                        </div>
+                        <button onClick={() => goToTrace(d.date, "listrik")} className="ml-11 flex w-[calc(100%-2.75rem)] flex-wrap items-center gap-x-3 gap-y-0.5 rounded-xl bg-emerald-500/8 px-3 py-1.5 text-left text-[0.6875rem] text-muted-foreground ring-1 ring-emerald-500/20 transition-colors hover:bg-emerald-500/12">
+                          <span className="font-medium text-foreground">{d.iotListrik.name}</span>
+                          <span>{tl("hari ini", "today")} <b className="text-foreground tabular">{num(d.iotListrik.periods?.today?.value ?? 0, 1)} {d.iotListrik.unit}</b></span>
+                          <span>{tl("bulan ini", "this month")} <b className="text-foreground tabular">{num(d.iotListrik.periods?.thisMonth?.value ?? 0, 0)} {d.iotListrik.unit}</b></span>
+                          <span className="ml-auto inline-flex items-center gap-0.5 font-medium text-primary">{tl("detail", "details")} <ArrowUpRight className="size-3" /></span>
+                        </button>
                       )}
                     </div>
                   )

@@ -15,6 +15,7 @@ import { api, fileUrl } from "@/lib/api"
 import { useAuth } from "@/lib/auth"
 import { addDays, fmtDate, num, groupByScope, pct, signedPct, SOURCES, todayWIB } from "@/lib/format"
 import { ScopeHeading } from "@/components/scope-group"
+import { IotBadge } from "@/components/iot-badge"
 import { tl } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
@@ -145,7 +146,7 @@ export default function TracePage() {
               return (
                 <button key={k} onClick={() => set({ source: k })} className={cn("-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-2xl px-2 py-2.5 text-left transition-colors", sel === k ? "bg-primary/10 ring-1 ring-primary/30" : "hover:bg-muted/60")}>
                   <span className="flex size-10 shrink-0 items-center justify-center rounded-full" style={{ background: `color-mix(in srgb, ${SOURCES[k]?.color} 18%, transparent)`, color: SOURCES[k]?.color }}><Ic className="size-[1.125rem]" /></span>
-                  <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{SOURCES[k]?.label ?? k}</span><span className="block truncate text-xs text-muted-foreground">Scope {v.scope} · {pct(d.total ? v.kg / d.total : 0, 1)}</span></span>
+                  <span className="min-w-0 flex-1"><span className="flex items-center gap-1.5 truncate text-sm font-medium">{SOURCES[k]?.label ?? k}{v.iot && <IotBadge source={k} iot={{ [k]: { devices: [{ name: v.iot.name, connection: v.iot.connection ?? "terhubung" }] } }} />}</span><span className="block truncate text-xs text-muted-foreground">Scope {v.scope} · {pct(d.total ? v.kg / d.total : 0, 1)}</span></span>
                   <span className="text-right text-sm font-semibold tabular">{num(v.kg, 1)}<span className="block text-[0.625rem] font-normal text-muted-foreground">kg</span></span>
                 </button>
               )

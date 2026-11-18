@@ -200,6 +200,17 @@ async function deviceView(d: any) {
   }
 }
 /** Sinkronisasi perangkat demo agar pembacaan selalu ada hingga hari ini */
+/** Sumber emisi yang datanya diisi sensor IoT aktif (mis. listrik ← kWh meter) — untuk penanda "Sensor IoT" di semua halaman. */
+export async function iotSources(orgId: number) {
+  const out: Record<string, { devices: { name: string; connection: string }[] }> = {}
+  for (const d of await q.all("SELECT * FROM iot_devices WHERE org_id = ? AND status = 'aktif'", orgId)) {
+    const c = IOT_CATEGORIES[categoryOf(d)]
+    if (!c || c.effect !== "emisi" || !c.source) continue
+    ;(out[c.source] ??= { devices: [] }).devices.push({ name: d.name, connection: connectionStatus(d as any) })
+  }
+  return out
+}
+
 export async function syncDemoIot(orgId = 1) {
   try {
     const dev = await q.get("SELECT * FROM iot_devices WHERE token = 'demo-ngs-meter-utama'")

@@ -14,9 +14,10 @@ import { useOrg } from "@/lib/hooks"
 import { useAuth } from "@/lib/auth"
 import { fmtDate, fmtMonth, kg, num, pct, signedPct, groupByScope, SOURCES, sourceScope, todayWIB, ton } from "@/lib/format"
 import { ScopeHeading } from "@/components/scope-group"
+import { IotBadge } from "@/components/iot-badge"
 import { t, tl } from "@/lib/i18n"
 import { CountUp, EmissionExplorer, type ExplorerMode } from "@/components/interactive-charts"
-import { PeriodFilter, usePeriod } from "@/components/period-filter"
+import { PeriodFilter, periodPhrase, usePeriod } from "@/components/period-filter"
 import { carbonBalance, InsightBar, MoreSection } from "@/components/carbon-balance"
 
 
@@ -77,6 +78,16 @@ export default function Carbon() {
           <Button size="lg" className="h-11" variant="outline" onClick={() => window.print()}><Printer /> {tl("Cetak / PDF", "Print / PDF")}</Button>
         </>} />
 
+      {/* ringkasan satu kalimat untuk pembaca awam */}
+      {total > 0 && (
+        <p className="max-w-4xl rounded-2xl bg-primary/6 px-5 py-4 text-base leading-relaxed text-foreground/90 ring-1 ring-primary/15">
+          {tl("Ringkasnya: ", "In short: ")}{periodPhrase(period)} {tl("sekolah menghasilkan", "the school produced")} <b>{totU === "t" ? `${num(total / 1000, 2)} ton` : `${num(total, 0)} kg`} CO₂e</b>{period.days > 1 ? "," : ""}
+          {period.days > 1 ? <>{" "}{tl("rata-rata", "about")} <b>{num(perDay, perDay < 10 ? 1 : 0)} kg</b> {tl("per hari", "per day")}.</> : "."}
+          {topSrc && <> {tl("Paling banyak dari", "Mostly from")} <b>{(SOURCES[topSrc[0]]?.label ?? topSrc[0]).toLowerCase()}</b> ({pct(topSrc[1] / Math.max(total, 1), 0)}).</>}
+          {delta !== null && <> {delta <= 0 ? tl(`Ini ${pct(-delta, 0)} lebih rendah dari kondisi awal sekolah.`, `That is ${pct(-delta, 0)} lower than the school's starting point.`) : tl(`Ini ${pct(delta, 0)} lebih tinggi dari kondisi awal sekolah.`, `That is ${pct(delta, 0)} higher than the school's starting point.`)}</>}
+        </p>
+      )}
+
       {/* ---------- 4 statistik utama: jawab "berapa, rata-rata, dari mana, per orang" ---------- */}
       <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <StatTile featured title={tl("Total emisi", "Total emissions")} unit={`${totU} CO₂e`}
@@ -124,14 +135,13 @@ export default function Carbon() {
               {g.items.map(([k, v]) => {
                 const I = SRC_ICON[k] ?? Zap
                 const lbl = Object.entries<number>(cur.srcLabels?.[k] ?? {}).sort((a, b) => b[1] - a[1])[0]?.[0]
-                const isIot = k === "listrik" && (lbl === "terukur" || cur.srcLabels?.[k]?.terukur)
                 return (
                   <Link key={k} to={`/app/trace?date=${traceDate(cur)}&source=${k}`} className="group -mx-2 flex w-[calc(100%+1rem)] items-center gap-3.5 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-muted/60">
                     <span className="flex size-11 shrink-0 items-center justify-center rounded-full" style={{ background: `color-mix(in srgb, ${SOURCES[k]?.color} 18%, transparent)`, color: SOURCES[k]?.color }}><I className="size-5" /></span>
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-2 truncate font-medium">
                         <span>{SOURCES[k]?.label ?? k}</span>
-                        {isIot && <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.2 text-[0.6875rem] font-semibold text-emerald-700 ring-1 ring-emerald-500/25 dark:text-emerald-300">⚡ Terukur IoT</span>}
+                        <IotBadge source={k} iot={data?.iotSources} />
                       </span>
                       <span className="block truncate text-xs text-muted-foreground">Scope {sourceScope(k, org)} · <b className="font-semibold text-foreground">{kg(v, 0)}</b> · {pct(v / cur.total, 1)}</span>
                     </span>
@@ -149,13 +159,12 @@ export default function Carbon() {
             <CardContent className="space-y-5">
               {([1, 2, 3] as const).map((sc) => {
                 const share = cur.total ? cur.scope[sc] / cur.total : 0
-                const isIotScope2 = sc === 2 && (cur.srcLabels?.listrik?.terukur != null)
                 return (
                   <div key={sc}>
                     <div className="mb-2 flex items-baseline justify-between text-sm">
                       <span className="font-medium flex items-center gap-2">
                         Scope {sc}
-                        {isIotScope2 && <span className="rounded-full bg-emerald-500/15 px-2 py-0.2 text-[0.6875rem] font-medium text-emerald-700 ring-1 ring-emerald-500/25 dark:text-emerald-300">⚡ IoT Smart Meter</span>}
+                        {sc === 2 && <IotBadge source="listrik" iot={data?.iotSources} />}
                       </span>
                       <span className="tabular"><b>{ton(cur.scope[sc])}</b> <span className="text-muted-foreground">· {pct(share, 1)}</span></span>
                     </div>

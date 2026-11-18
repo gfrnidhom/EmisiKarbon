@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { SourceLabel } from "@/components/source-label"
+import { UsedSources } from "@/components/used-sources"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
@@ -125,6 +126,8 @@ export default function Factors() {
             <Button className="h-10 rounded-xl" disabled={!editable} onClick={() => setAdd({ ext_id: "", name: "", name_en: "", category: cat === "Semua" ? "Pembelian barang" : cat, scope: "3", activity_unit: "", unit: "kg CO2e/", gas: "CO2e", gwp_basis: "-", source: "", value: "", version: nextVersion(versions) })}><Plus /> {t("Faktor")}</Button>
           </>}
         </>} />
+
+      <UsedSources factors={data ?? []} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[{ k: null, label: "Total faktor", n: counts.total, cls: "from-primary/12 to-transparent", icon: Factory },

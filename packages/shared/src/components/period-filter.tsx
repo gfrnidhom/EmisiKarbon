@@ -37,6 +37,16 @@ export function resolvePeriod(key: PeriodKey, from?: string | null, to?: string 
   return { key, start, end, label, days: span(start, end) }
 }
 
+/** Frasa periode untuk kalimat ringkasan ("kemarin", "dalam sebulan terakhir", …). */
+export function periodPhrase(p: Period) {
+  const m: Record<string, [string, string]> = {
+    today: ["hari ini", "today"], yesterday: ["kemarin", "yesterday"], "7d": ["dalam 7 hari terakhir", "over the last 7 days"],
+    "1m": ["dalam sebulan terakhir", "over the last month"], "6m": ["dalam 6 bulan terakhir", "over the last 6 months"], "1y": ["dalam setahun terakhir", "over the last year"],
+  }
+  const x = m[p.key]
+  return x ? tl(x[0], x[1]) : tl(`pada ${p.label}`, `over ${p.label}`)
+}
+
 /** Periode tersimpan di URL (?range=7d atau ?range=custom&from=…&to=…) agar bisa dibagikan & bertahan saat muat ulang. */
 export function usePeriod(defaultKey: PeriodKey = "1m") {
   const [params, setParams] = useSearchParams()
