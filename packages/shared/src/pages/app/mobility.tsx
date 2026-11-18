@@ -18,11 +18,7 @@ import { useOrg } from "@/lib/hooks"
 import { fmtDate, kg, num, pct, todayWIB } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { t as tr, tl } from "@/lib/i18n"
-
-const MODE: Record<string, { label: string; color: string }> = {
-  motor: { label: tr("Sepeda motor"), color: "var(--scope3)" }, mobil: { label: tr("Mobil"), color: "var(--scope1)" }, angkot: { label: tr("Angkot"), color: "var(--scope2)" },
-  bus: { label: tr("Bus"), color: "oklch(0.6 0.1 300)" }, jalan: { label: tr("Jalan kaki"), color: "var(--leaf)" }, sepeda: { label: tr("Sepeda"), color: "oklch(0.7 0.12 140)" },
-}
+import { modeColor, modeLabel } from "@/lib/mobility-modes"
 
 export default function Mobility() {
   const { orgId, can } = useOrg()
@@ -48,10 +44,10 @@ export default function Mobility() {
   const perm = usePerm()
   const [editS, setEditS] = useState<any>(null)
   if (isLoading) return <PageSkeleton />
-  const modes = s ? Object.entries<any>(s.byMode).map(([k, v]) => ({ key: k, label: MODE[k]?.label ?? k, value: v.n, color: MODE[k]?.color ?? "gray", ...v })) : []
+  const modes = s ? Object.entries<any>(s.byMode).map(([k, v]) => ({ key: k, label: modeLabel(k), value: v.n, color: modeColor(k), ...v })) : []
   return (
     <div className="space-y-8">
-      <PageHeader icon={Bike} title={tr("Mobilitas")} description={tr("Survei 1 menit tanpa akun via tautan/QR. Dihitung sebagai km kendaraan: faktor antar-jemput, jumlah penumpang, porsi hari, ekstrapolasi per kelas.")}
+      <PageHeader icon={Bike} title={tr("Mobilitas")} description={tl("Survei 1 menit tanpa akun via tautan/QR: moda (jalan kaki sampai pesawat) dan jarak harian pulang-pergi. Dihitung dengan faktor emisi per moda, dibagi penumpang, porsi hari, lalu diekstrapolasi per kelas.", "1-minute survey via link/QR, no account: mode (walking to flying) and daily round-trip distance. Calculated with a per-mode emission factor, divided by passengers, weighted by days, then extrapolated per class.")}
         actions={perm.manage && <Button onClick={() => setCreate(true)}><Plus /> {tr("Survei baru")}</Button>} />
       {!perm.manage && (
         <div className="flex items-start gap-3 rounded-2xl bg-sky-500/10 px-4 py-3 text-sm text-sky-900 ring-1 ring-sky-500/20 dark:text-sky-200">
@@ -108,6 +104,27 @@ export default function Mobility() {
             </Card>
           </div>
         </>
+      )}
+      {data.modes && (
+        <Card>
+          <CardHeader>
+            <CardTitle>{tl("Cara hitung & faktor emisi per moda", "Method & emission factor per mode")}</CardTitle>
+            <CardDescription>{tl(`Emisi per hari = jarak harian (km pulang-pergi) ÷ penumpang × faktor emisi × (hari/minggu ÷ ${data.schoolDays} hari sekolah). Faktor diambil dari menu Faktor Emisi.`, `Daily emission = daily distance (round-trip km) ÷ passengers × emission factor × (days/week ÷ ${data.schoolDays} school days). Factors come from the Emission Factors menu.`)}</CardDescription>
+          </CardHeader>
+          <CardContent className="px-0">
+            <Table>
+              <TableHeader><TableRow><TableHead className="pl-6">{tl("Moda", "Mode")}</TableHead><TableHead>{tl("Faktor emisi", "Emission factor")}</TableHead><TableHead>{tl("Dibagi", "Divided by")}</TableHead><TableHead className="pr-6">{tl("Sumber", "Source")}</TableHead></TableRow></TableHeader>
+              <TableBody>{data.modes.map((m: any) => (
+                <TableRow key={m.key}>
+                  <TableCell className="pl-6 font-medium"><span className="flex items-center gap-2"><span className="size-2.5 rounded-full" style={{ background: modeColor(m.key) }} />{modeLabel(m.key)}</span></TableCell>
+                  <TableCell className="text-sm tabular">{m.factors.map((f: any) => <div key={f.code}>{f.value === null ? "–" : <b>{num(f.value, f.value === 0 ? 0 : f.value < 0.1 ? 4 : 3)}</b>} <span className="text-muted-foreground">{f.unit}</span>{m.factors.length > 1 && <span className="text-xs text-muted-foreground"> · {f.name.replace(/^Pesawat domestik ekonomi /, "")}</span>}</div>)}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{m.per === "penumpang" ? tl("sudah per penumpang", "already per passenger") : m.load ? tl(`muatan rata-rata ${m.load} orang`, `average load ${m.load}`) : tl("jumlah orang di kendaraan", "people in the vehicle")}</TableCell>
+                  <TableCell className="pr-6 text-xs text-muted-foreground">{m.factors[0]?.source}</TableCell>
+                </TableRow>
+              ))}</TableBody>
+            </Table>
+          </CardContent>
+        </Card>
       )}
       <Dialog open={!!share} onOpenChange={(o) => !o && setShare(null)}>
         <DialogContent className="sm:max-w-sm">

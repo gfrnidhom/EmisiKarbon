@@ -42,18 +42,18 @@ org.patch("/:orgId", async (c) => {
 org.post("/:orgId/gis-ai", async (c) => {
   const id = oid(c); (await assertOrg(c, id))
   const key = CONFIG.GEMINI_API_KEY
-  if (!key) return c.json({ fallback: true })
-  const { dataUrl, center, landM2 } = await c.req.json()
+  if (!key) return c.json({ fallback: true, reason: "Kunci API Gemini belum diisi (Konfigurasi Sistem → Integrasi)" })
+  const { dataUrl, center, landM2, aspect } = await c.req.json()
   const m = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(String(dataUrl ?? ""))
-  if (!m) return c.json({ fallback: true })
-  const scale = Math.min(1.35, Math.max(0.75, Math.sqrt((Number(landM2) || 12000) / 12000)))
+  if (!m) return c.json({ fallback: true, reason: "Format gambar tidak dikenali" })
+  const ar = Math.min(10, Math.max(0.1, Number(aspect) || 1)) // lebar ÷ tinggi gambar
   const lat0 = Number(center?.lat) || -7.2321, lng0 = Number(center?.lng) || 111.7792
-  const ll = (x: number, y: number): [number, number] => [
-    Number((lat0 + (y * scale) / 110540).toFixed(6)),
-    Number((lng0 + (x * scale) / (111320 * Math.cos((lat0 * Math.PI) / 180))).toFixed(6)),
-  ]
   try {
-    const prompt = `Analisis gambar denah/citra satelit sekolah ini dan ubah menjadi fitur GIS vektor dalam koordinat meter lokal relatif pusat lahan: x dari -60 (Barat/kiri) sampai +60 (Timur/kanan), y dari -50 (Selatan/bawah) sampai +50 (Utara/atas). Kembalikan JSON murni dengan format: {"features":[{"type":"boundary"|"building"|"field"|"garden"|"parking"|"path"|"water"|"gate","name":"nama singkat Bahasa Indonesia","pts":[[x,y],...]}]}. Wajib ada 1 boundary (4 titik mengelilingi lahan), gedung-gedung (building, 4 titik persegi panjang tiap gedung), lapangan (field), kebun/taman (garden), parkir (parking), jalur jalan (path, 2-4 titik), dan 1 gerbang (gate, 1 titik).`
+    const prompt = `Ini gambar denah atau citra satelit sebuah sekolah. Ubah setiap objek yang BENAR-BENAR terlihat menjadi poligon GIS.
+Koordinat memakai grid gambar: x 0 (tepi kiri) sampai 1000 (tepi kanan), y 0 (tepi atas) sampai 1000 (tepi bawah).
+Jenis: "building" (gedung/ruang: kelas, kantor, WC, aula, musala, kantin, dll.), "field" (lapangan/halaman), "garden" (taman/kebun/area hijau), "parking" (parkir, paving, teras, selasar), "water" (kolam/tandon), "path" (jalan, 2–4 titik garis), "gate" (gerbang, 1 titik), "boundary" (batas lahan/pagar, bila terlihat).
+Aturan: satu ruang = satu objek building dengan 4 titik sudutnya; pakai tulisan pada gambar sebagai "name" persis (mis. "Kelas IV-A", "Ruang Guru"); JANGAN menambah objek yang tidak ada di gambar; abaikan judul, legenda, nama jalan di luar lahan, ikon bendera/pohon kecil.
+Balas JSON murni: {"features":[{"type":"building","name":"Kelas 1","pts":[[x,y],[x,y],[x,y],[x,y]]}]}`
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -62,17 +62,28 @@ org.post("/:orgId/gis-ai", async (c) => {
         generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
       }),
     })
-    if (!res.ok) return c.json({ fallback: true })
+    if (!res.ok) return c.json({ fallback: true, reason: `Gemini menolak permintaan (HTTP ${res.status})` })
     const out: any = await res.json()
     const raw = JSON.parse(out?.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}")
     const valid = new Set(["boundary", "building", "field", "garden", "parking", "path", "water", "gate"])
-    const features = (Array.isArray(raw.features) ? raw.features : [])
+    const list = (Array.isArray(raw.features) ? raw.features : [])
       .filter((f: any) => valid.has(f?.type) && Array.isArray(f?.pts) && f.pts.length >= (f.type === "gate" ? 1 : f.type === "path" ? 2 : 3))
-      .map((f: any) => ({ type: f.type, name: f.name ? String(f.name) : undefined, coords: f.pts.map(([x, y]: [number, number]) => ll(Number(x) || 0, Number(y) || 0)) }))
-    if (features.length < 3) return c.json({ fallback: true })
+      .map((f: any) => ({ type: f.type, name: f.name ? String(f.name).slice(0, 60) : undefined, pts: f.pts.map(([x, y]: [number, number]) => [((Number(x) || 0) / 1000) * ar, (Number(y) || 0) / 1000]) }))
+    if (list.length < 2) return c.json({ fallback: true, reason: "Gemini tidak menemukan cukup objek" })
+    // skala: kotak isi denah = luas lahan sekolah; proporsi gambar dipertahankan
+    const all = list.flatMap((f: any) => f.pts)
+    const xs = all.map((p: number[]) => p[0]), ys = all.map((p: number[]) => p[1])
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys)
+    const mPerUnit = Math.sqrt((Number(landM2) || 12000) / Math.max(1e-6, (x1 - x0) * (y1 - y0)))
+    const cxu = (x0 + x1) / 2, cyu = (y0 + y1) / 2
+    const ll = ([u, v]: number[]): [number, number] => [
+      Number((lat0 + ((cyu - v) * mPerUnit) / 110540).toFixed(6)),
+      Number((lng0 + ((u - cxu) * mPerUnit) / (111320 * Math.cos((lat0 * Math.PI) / 180))).toFixed(6)),
+    ]
+    const features = list.map((f: any) => ({ type: f.type, name: f.name, coords: f.pts.map(ll) }))
     return c.json({ features, mode: "ai-server" })
-  } catch {
-    return c.json({ fallback: true })
+  } catch (e: any) {
+    return c.json({ fallback: true, reason: `Gemini gagal: ${e?.message ?? e}` })
   }
 })
 

@@ -3,6 +3,7 @@ import { q, json, type Row } from "../db"
 import { addDays, daysBetween, daysInMonth, monthOf, todayWIB } from "../lib"
 import * as C from "./calc"
 import { FE_VERSION, SOURCE_META } from "./factors"
+import { ALL_MODE_FACTORS, MODES, modeFactorCode, modeOccupants } from "./modes"
 
 export type Label =
   | "proyeksi" | "input" | "terverifikasi" | "estimasi" | "interpolasi" | "aktual" | "rata-rata" | "rata-rata lama" | "terukur" | "kosong" | "sementara"
@@ -15,8 +16,14 @@ export interface SourceResult { kg: number; label: Label; scope: 1 | 2 | 3; trac
 export interface Trace { da: number; daUnit: string; factors: { code: string; name?: string; value: number; unit: string; version: string; source: string }[]; formula: string; recordIds?: number[]; note?: string }
 export interface DayResult { date: string; dayType: string; k: number; total: number; scope: Record<1 | 2 | 3, number>; sources: Record<string, SourceResult> }
 
-export const MODE_FACTOR: Record<string, string> = {
-  motor: "TR_MOTOR", mobil: "TR_SEDAN", angkot: "TR_ANGKOT", bus: "TR_BUS_SDG", jalan: "TR_AKTIF", sepeda: "TR_AKTIF",
+export const MODE_FACTOR: Record<string, string> = Object.fromEntries(Object.entries(MODES).map(([k, m]) => [k, m.factor]))
+/** Jarak harian respons: kolom daily_km; data lama (sekali jalan) = 2 × jarak × faktor antar. */
+export const responseDailyKm = (r: Row) => (r.daily_km ?? 2 * (r.distance_km ?? 0) * (r.escort === 2 ? 2 : 1)) as number
+/** Ubah satu baris mobility_responses menjadi masukan rumus (faktor dari tabel emission_factors). */
+export function toMobilityResp(r: Row, fe: Record<string, Factor>, schoolDays: number): C.MobilityResp & { code: string } {
+  const dailyKm = responseDailyKm(r)
+  const code = modeFactorCode(r.mode, dailyKm)
+  return { dailyKm, occupants: modeOccupants(r.mode, r.occupants), factor: fe[code]?.value ?? 0, daysPerWeek: r.days_per_week ?? schoolDays, count: r.count ?? 1, code }
 }
 const REF_CODE: Record<string, string> = { R32: "REF_R32", R410A: "REF_R410A", R134A: "REF_R134A", R22: "REF_R22" }
 
@@ -272,7 +279,7 @@ export function computeDay(ctx: OrgContext, date: string): DayResult {
     if (sv && k > 0) {
       const m = mobilityFromSurvey(ctx, sv)
       const svIdx = ctx.surveys.indexOf(sv)
-      sources.mobilitas = { basis: svIdx > 0 ? { kind: "terbaru", period: sv.date, text: `Survei terbaru: ${sv.s.title ?? sv.date}` } : { kind: "baseline", period: sv.date, text: `Survei awal: ${sv.s.title ?? sv.date}` }, kg: m.kg * k, label: m.flagged ? "estimasi" : "aktual", scope: 3, trace: { da: m.km * k, daUnit: "km kendaraan", factors: Object.values(MODE_FACTOR).filter((v, i, a) => a.indexOf(v) === i).flatMap((c) => fRef(fe[c])), formula: `Dari survei mobilitas (respons ${fx(m.rate * 100, 0)}%): jarak pulang-pergi tiap responden × faktor moda (motor, mobil, angkot, bus; jalan kaki & sepeda = 0), dibagi jumlah penumpang, lalu diskalakan ke seluruh ${fx(ctx.population, 0)} warga. Total ${fx(m.km * k, 0)} km kendaraan hari ini.`, note: m.flagged ? "Respons < 70% — ditandai" : undefined } }
+      sources.mobilitas = { basis: svIdx > 0 ? { kind: "terbaru", period: sv.date, text: `Survei terbaru: ${sv.s.title ?? sv.date}` } : { kind: "baseline", period: sv.date, text: `Survei awal: ${sv.s.title ?? sv.date}` }, kg: m.kg * k, label: m.flagged ? "estimasi" : "aktual", scope: 3, trace: { da: m.km * k, daUnit: "km kendaraan", factors: ALL_MODE_FACTORS.filter((c) => fe[c]).flatMap((c) => fRef(fe[c])), formula: `Dari survei mobilitas (respons ${fx(m.rate * 100, 0)}%): jarak harian (km pulang-pergi per hari) tiap responden × faktor moda dari tabel faktor emisi (motor, ojek, mobil, taksi, antar-jemput, angkot, bus, kereta, pesawat; jalan kaki & sepeda = 0), dibagi jumlah penumpang (angkutan umum: muatan rata-rata), × hari per minggu ÷ hari sekolah, lalu diskalakan ke seluruh ${fx(ctx.population, 0)} warga. Total ${fx(m.km * k, 0)} km kendaraan hari ini.`, note: m.flagged ? "Respons < 70% — ditandai" : undefined } }
     } else sources.mobilitas = { kg: 0, label: sv ? "aktual" : "kosong", scope: 3, trace: { da: 0, daUnit: "km", factors: [], formula: "Hari libur: perjalanan ke sekolah tidak dihitung." } }
   }
   // ---- Air limbah ----
@@ -329,10 +336,7 @@ export function mobilityFromSurvey(ctx: OrgContext, sv: { s: Row; resps: Row[] }
   const hit = mobilityCache.get(sv.s)
   if (hit) return hit
   const schoolDays = ctx.org.school_days_per_week ?? 6
-  const toResp = (r: Row): C.MobilityResp => ({
-    distanceKm: r.distance_km, escort: (r.escort === 2 ? 2 : 1), occupants: r.mode === "angkot" ? Math.max(r.occupants, 8) : r.occupants,
-    factor: ctx.fe[MODE_FACTOR[r.mode] ?? "TR_MOTOR"]?.value ?? 0, daysPerWeek: r.days_per_week ?? schoolDays, count: r.count ?? 1,
-  })
+  const toResp = (r: Row): C.MobilityResp => toMobilityResp(r, ctx.fe, schoolDays)
   const classes: Record<string, number> = json(sv.s.classes, {})
   const N = ctx.population
   const all = sv.resps.map(toResp)

@@ -132,6 +132,7 @@ const ADDED_COLUMNS: [string, string][] = [
   ["day_ledger", "tree_stock REAL DEFAULT 0"], ["day_ledger", "tree_count INTEGER DEFAULT 0"], ["day_ledger", "tree_active INTEGER DEFAULT 0"],
   ["day_ledger", "av_kompos_kg REAL DEFAULT 0"], ["day_ledger", "av_kompos REAL DEFAULT 0"], ["day_ledger", "av_kertas_kg REAL DEFAULT 0"], ["day_ledger", "av_kertas REAL DEFAULT 0"],
   ["day_ledger", "av_material_kg REAL DEFAULT 0"], ["day_ledger", "av_plts_kwh REAL DEFAULT 0"], ["day_ledger", "av_plts REAL DEFAULT 0"],
+  ["mobility_responses", "daily_km REAL"],
 ]
 /** Tabel yang id-nya tampil di URL → memakai UUID. */
 export const UUID_TABLES = ["assets", "reports", "verification_tasks", "baselines", "iot_devices", "waste_sessions", "mobility_surveys", "field_samples"] as const
@@ -141,6 +142,8 @@ export async function migrate() {
   await runMigration([
     pg ? toPgDDL(SCHEMA) : SCHEMA,
     ...ADDED_COLUMNS.map(([table, col]) => (pg ? `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${toPgDDL(col)}` : `ALTER TABLE ${table} ADD COLUMN ${col}`)),
+    // Survei mobilitas memakai jarak harian (pulang-pergi); isi dari data lama sekali jalan × 2 × faktor antar
+    "UPDATE mobility_responses SET daily_km = 2 * distance_km * (CASE WHEN escort = 2 THEN 2 ELSE 1 END) WHERE daily_km IS NULL AND distance_km IS NOT NULL",
     // Pustaka jenis pohon sekolah (hanya menambah yang belum ada; tidak menimpa ubahan admin)
     "INSERT INTO species(local_name, scientific, equation, a, b, density, growth_default, dbh_min, dbh_max, carbon_fraction, root_ratio, carbon_tree, source, description, density_source, active) SELECT 'Mangga', 'Mangifera indica', 'chave', NULL, NULL, 0.55, 0.8, 5, 150, 0.47, 0.24, 1, 'Chave 2014 / Ketterings 2001 + berat jenis (model umum)', 'Pohon buah peneduh berdaun lebat; tajuknya rindang dan cocok untuk halaman sekolah.', 'Perkiraan berat jenis dari Global Wood Density Database (Zanne et al. 2009); ganti dengan data lokal bila ada', 1 WHERE NOT EXISTS (SELECT 1 FROM species WHERE local_name = 'Mangga')",
     "INSERT INTO species(local_name, scientific, equation, a, b, density, growth_default, dbh_min, dbh_max, carbon_fraction, root_ratio, carbon_tree, source, description, density_source, active) SELECT 'Nangka', 'Artocarpus heterophyllus', 'chave', NULL, NULL, 0.61, 0.8, 5, 150, 0.47, 0.24, 1, 'Chave 2014 / Ketterings 2001 + berat jenis (model umum)', 'Pohon buah berkayu kuning yang kuat; buahnya besar dan bisa dimanfaatkan kantin sekolah.', 'Perkiraan berat jenis dari Global Wood Density Database (Zanne et al. 2009); ganti dengan data lokal bila ada', 1 WHERE NOT EXISTS (SELECT 1 FROM species WHERE local_name = 'Nangka')",

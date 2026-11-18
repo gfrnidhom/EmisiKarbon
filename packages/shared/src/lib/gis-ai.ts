@@ -29,22 +29,7 @@ export function inferCenter(features: SiteFeature[], points: { lat: number; lng:
   }
 }
 
-const BUILDING_NAMES = [
-  "Gedung Utama & TU",
-  "Ruang Kelas A",
-  "Ruang Kelas B",
-  "Ruang Kelas C",
-  "Laboratorium",
-  "Perpustakaan",
-  "Aula Sekolah",
-  "Musala",
-  "Kantin",
-  "UKS & Koperasi",
-  "Ruang Guru",
-  "Gudang & Bengkel",
-]
-
-type Box = { x1: number; y1: number; x2: number; y2: number; area: number; score: number }
+type Rect = { x1: number; y1: number; x2: number; y2: number } // sel grid, inklusif
 
 function rgbToHsv(r: number, g: number, b: number) {
   const rf = r / 255, gf = g / 255, bf = b / 255
@@ -83,267 +68,270 @@ export interface GisAiResult {
   dataUrl: string
 }
 
+type Region = { label: number; mean?: number[]; cells: number[]; box: Rect; edge: boolean; kind?: "building" | "white" | "veg" | "water" | "paved" | "solid"; name?: string }
+export type GisProgress = (msg: string) => void
+
+/** Kecocokan nama label denah → jenis objek GIS. */
+function typeFromName(name: string): SiteFeatureType | null {
+  const n = `${name.toLowerCase()} ${name.toLowerCase().replace(/\s+/g, "")}` // label terpotong baris: "GER BANG" → "gerbang"
+  if (/\b(lapangan|halaman|taman|kebun|rumput|hutan)\b/.test(n)) return /taman|kebun|hutan/.test(n) ? "garden" : "field"
+  if (/\b(parkir|paving|teras|selasar|koridor|jalan)\b/.test(n)) return "parking"
+  if (/\b(kolam|tandon|sumur|empang)\b/.test(n)) return "water"
+  if (/\b(gerbang|gate|pintu masuk)\b/.test(n)) return "gate"
+  return null
+}
+
 /**
- * Analisis citra/denah (foto satelit, gambar denah arsitektur, atau sketsa) → vektor GIS `SiteFeature[]`
- * sesuai format `GisMap` (boundary, building, field, garden, parking, path, water, gate).
+ * Vektorisasi lokal gambar denah / citra → `SiteFeature[]` (tanpa layanan luar kecuali OCR teks).
+ * Mendukung: kotak berwarna (denah infografis), ruang bergaris (denah garis/arsitektur), arsiran, bingkai lahan.
+ *  1. Piksel gelap = garis/dinding/teks (pembatas). Warna lain dikelompokkan (k-means) lalu dihaluskan
+ *     (filter modus) agar arsiran tipis & anti-alias hilang.
+ *  2. Area berwarna sama yang tersambung = satu objek; latar luar dibuang; area putih yang membungkus
+ *     objek lain = batas lahan; area putih tertutup = ruang/gedung, yang besar & kosong = halaman.
+ *  3. Warna → jenis: hijau = taman/lapangan, biru = air, kuning pekat/abu-abu = perkerasan, lainnya = gedung.
+ *  4. OCR (tesseract.js, bahasa Indonesia) membaca label di dalam tiap objek → nama & jenis (mis. "Lapangan", "Parkir").
+ *  5. Proporsi gambar dipertahankan; skala meter dari luas lahan sekolah. Tidak ada objek karangan.
  */
-export async function analyzeImageToGis(
-  dataUrl: string,
-  opts: { center: GisCenter; landM2?: number }
-): Promise<GisAiResult> {
+export async function analyzeImageToGis(dataUrl: string, opts: { center: GisCenter; landM2?: number; onProgress?: GisProgress; ocr?: boolean }): Promise<GisAiResult> {
+  const say = opts.onProgress ?? (() => {})
+  say("Membaca gambar…")
   const img = await loadImage(dataUrl)
-  const W = 96, H = 80
+  say("Mendeteksi ruang & area…")
+  const iw = img.naturalWidth || img.width || 800, ih = img.naturalHeight || img.height || 600
+  const k = Math.min(1.5, 640 / Math.max(iw, ih))
+  const W = Math.max(64, Math.round(iw * k)), H = Math.max(64, Math.round(ih * k))
   const canvas = document.createElement("canvas")
   canvas.width = W; canvas.height = H
-  const ctx = canvas.getContext("2d")!
-  ctx.drawImage(img, 0, 0, W, H)
-  const { data } = ctx.getImageData(0, 0, W, H)
-
-  // Skala lahan: default ±120m × 100m (12.000 m²), menyesuaikan luas lahan sekolah
-  const scale = Math.min(1.35, Math.max(0.75, Math.sqrt((opts.landM2 || 12000) / 12000)))
-  const halfW = 60 * scale, halfH = 50 * scale
-  const gxToM = (gx: number) => ((gx / W) * 2 - 1) * halfW
-  // y di gambar: 0 = atas (Utara = +halfH), H = bawah (Selatan = -halfH)
-  const gyToM = (gy: number) => (1 - (gy / H) * 2) * halfH
-  const rectCoords = (x1: number, y1: number, x2: number, y2: number): [number, number][] => [
-    toLatLng(opts.center, x1, y1),
-    toLatLng(opts.center, x2, y1),
-    toLatLng(opts.center, x2, y2),
-    toLatLng(opts.center, x1, y2),
-  ]
-
-  // Estimasi warna latar dari tepi gambar (untuk membedakan denah di atas kertas putih/gelap vs foto satelit)
-  let borderV = 0, borderS = 0, borderN = 0
-  for (let x = 0; x < W; x++) for (const y of [0, 1, H - 2, H - 1]) {
-    const i = (y * W + x) * 4
-    const hsv = rgbToHsv(data[i], data[i + 1], data[i + 2])
-    borderV += hsv.v; borderS += hsv.s; borderN++
+  const cx = canvas.getContext("2d", { willReadFrequently: true })!
+  cx.fillStyle = "#fff"; cx.fillRect(0, 0, W, H)
+  cx.drawImage(img, 0, 0, W, H)
+  const px = cx.getImageData(0, 0, W, H).data
+  const N = W * H
+  const at = (x: number, y: number) => y * W + x
+  // 1) warna latar = warna terbanyak di tepi gambar (bukan rata-rata: garis & jalan di tepi tidak ikut)
+  const bins = new Map<number, { n: number; r: number; g: number; b: number }>()
+  const tallyBorder = (x: number, y: number) => { const i = at(x, y) * 4; const key = ((px[i] >> 4) << 8) | ((px[i + 1] >> 4) << 4) | (px[i + 2] >> 4); const e = bins.get(key) ?? { n: 0, r: 0, g: 0, b: 0 }; e.n++; e.r += px[i]; e.g += px[i + 1]; e.b += px[i + 2]; bins.set(key, e) }
+  for (let x = 0; x < W; x++) for (const y of [0, 1, 2, H - 3, H - 2, H - 1]) tallyBorder(x, y)
+  for (let y = 0; y < H; y++) for (const x of [0, 1, 2, W - 3, W - 2, W - 1]) tallyBorder(x, y)
+  const topBin = [...bins.values()].sort((u, v) => v.n - u.n)[0]
+  const bgC = [topBin.r / topBin.n, topBin.g / topBin.n, topBin.b / topBin.n]
+  const bgHsv = rgbToHsv(bgC[0], bgC[1], bgC[2])
+  const bgLight = bgHsv.v > 0.7 && bgHsv.s < 0.25
+  // 2) pembatas: garis/dinding gelap (garis tipis yang memudar saat diperkecil tetap dihitung)
+  const darkV = bgLight ? Math.min(0.62, bgHsv.v - 0.3) : 0.3
+  const dark = new Uint8Array(N)
+  for (let p = 0; p < N; p++) {
+    const { s, v } = rgbToHsv(px[p * 4], px[p * 4 + 1], px[p * 4 + 2])
+    if (v < darkV && s < 0.4) dark[p] = 1
   }
-  const bgLight = borderV / borderN > 0.78 && borderS / borderN < 0.2
+  for (let x = 0; x < W; x++) { dark[x] = 1; dark[at(x, H - 1)] = 1 } // bingkai buatan: ruang terpotong tepi tetap tertutup
+  for (let y = 0; y < H; y++) { dark[at(0, y)] = 1; dark[at(W - 1, y)] = 1 }
 
-  // Klasifikasi piksel: 0 = netral, 1 = building, 2 = veg (field/garden), 3 = water, 4 = paved/parking
-  const cls = new Uint8Array(W * H)
-  const lum = new Float32Array(W * H)
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      const idx = y * W + x, i = idx * 4
-      const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3]
-      if (a < 40) continue
-      lum[idx] = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-      const { h, s, v } = rgbToHsv(r, g, b)
-
-      // Air / kolam (biru/toska)
-      if (h >= 175 && h <= 250 && s > 0.24 && v > 0.22) { cls[idx] = 3; continue }
-      // Vegetasi / lapangan rumput / taman (hijau)
-      if ((h >= 68 && h <= 168 && s > 0.16 && v > 0.16) || (g > r * 1.12 && g > b * 1.1 && g > 45)) { cls[idx] = 2; continue }
-      // Atap bangunan (merah bata / oranye / cokelat / kuning tua pada citra satelit atau denah berwarna)
-      if ((h <= 46 || h >= 335) && s > 0.2 && v > 0.22 && v < 0.94) { cls[idx] = 1; continue }
-      // Pada denah berlatar terang: blok abu-abu gelap / hitam / warna pekat = bangunan
-      if (bgLight && ((v < 0.62 && s < 0.25) || (s > 0.28 && v < 0.88))) { cls[idx] = 1; continue }
-      // Area perkerasan / parkir
-      if (s < 0.16 && v >= 0.35 && v <= 0.76) { cls[idx] = 4; continue }
+  // 3) penghalusan median 3×3 (hanya piksel bukan pembatas): arsiran tipis, tepi anti-alias, derau JPEG hilang
+  const col = new Float32Array(N * 3)
+  for (let p = 0; p < N; p++) { col[p * 3] = px[p * 4]; col[p * 3 + 1] = px[p * 4 + 1]; col[p * 3 + 2] = px[p * 4 + 2] }
+  const buf: number[][] = [[], [], []]
+  for (let pass = 0; pass < 2; pass++) {
+    const next = col.slice()
+    for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+      const p = at(x, y)
+      if (dark[p]) continue
+      buf[0].length = buf[1].length = buf[2].length = 0
+      for (const q of [p - W - 1, p - W, p - W + 1, p - 1, p, p + 1, p + W - 1, p + W, p + W + 1]) if (!dark[q]) for (let c = 0; c < 3; c++) buf[c].push(col[q * 3 + c])
+      const m = buf[0].length >> 1
+      for (let c = 0; c < 3; c++) next[p * 3 + c] = buf[c].sort((u, v) => u - v)[m]
     }
+    col.set(next)
   }
 
-  // Bila gambar monokrom / sketsa tipis dan bangunan sedikit terdeteksi, gunakan kontras lokal terhadap rata-rata
-  let bCount = 0
-  for (let i = 0; i < cls.length; i++) if (cls[i] === 1) bCount++
-  if (bCount < W * H * 0.03) {
-    let mean = 0
-    for (let i = 0; i < lum.length; i++) mean += lum[i]
-    mean /= lum.length
-    for (let y = 3; y < H - 3; y++) {
-      for (let x = 3; x < W - 3; x++) {
-        const idx = y * W + x
-        if (cls[idx] !== 0) continue
-        const d = bgLight ? mean - lum[idx] : Math.abs(lum[idx] - mean)
-        if (d > 0.12) cls[idx] = 1
+  // 4) region growing: piksel bergabung bila warnanya dekat rata-rata area
+  say("Mendeteksi ruang & area…")
+  const T2 = 17 * 17
+  const seen = new Uint8Array(N)
+  const regions: Region[] = []
+  for (let p0 = 0; p0 < N; p0++) {
+    if (dark[p0] || seen[p0]) continue
+    const stack = [p0], cells: number[] = []
+    seen[p0] = 1
+    let mr = col[p0 * 3], mg = col[p0 * 3 + 1], mb = col[p0 * 3 + 2]
+    let x1 = W, y1 = H, x2 = 0, y2 = 0, edge = false
+    while (stack.length) {
+      const p = stack.pop()!, x = p % W, y = (p / W) | 0
+      cells.push(p)
+      const n = cells.length
+      mr += (col[p * 3] - mr) / n; mg += (col[p * 3 + 1] - mg) / n; mb += (col[p * 3 + 2] - mb) / n
+      if (x < x1) x1 = x; if (x > x2) x2 = x; if (y < y1) y1 = y; if (y > y2) y2 = y
+      if (x <= 1 || y <= 1 || x >= W - 2 || y >= H - 2) edge = true
+      for (const q of [p - 1, p + 1, p - W, p + W]) {
+        if (dark[q] || seen[q]) continue
+        const dr = col[q * 3] - mr, dg = col[q * 3 + 1] - mg, db = col[q * 3 + 2] - mb
+        if (dr * dr + dg * dg + db * db < T2) { seen[q] = 1; stack.push(q) }
       }
     }
+    const isBg = (mr - bgC[0]) ** 2 + (mg - bgC[1]) ** 2 + (mb - bgC[2]) ** 2 < T2
+    regions.push({ label: isBg ? 0 : 1, mean: [mr, mg, mb], cells, box: { x1, y1, x2, y2 }, edge })
+  }
+  // area terbesar (> 25% gambar) = latar, apa pun warnanya (mis. latar abu-abu muda di dalam bingkai jalan)
+  const biggest = regions.reduce((m, r) => (r.cells.length > (m?.cells.length ?? 0) ? r : m), regions[0])
+  if (biggest && biggest.cells.length > N * 0.25) biggest.label = 0
+  // blok terisi gelap (gedung diarsir hitam/abu tua): pembatas yang tetap ada setelah "opening" radius 2
+  const erode = (m: Uint8Array) => { const o = new Uint8Array(N); for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) { const p = at(x, y); o[p] = m[p] & m[p - 1] & m[p + 1] & m[p - W] & m[p + W] }; return o }
+  const dilate = (m: Uint8Array) => { const o = new Uint8Array(N); for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) { const p = at(x, y); o[p] = m[p] | m[p - 1] | m[p + 1] | m[p - W] | m[p + W] }; return o }
+  const solid = dilate(dilate(erode(erode(dark))))
+  const seen2 = new Uint8Array(N)
+  for (let p0 = 0; p0 < N; p0++) {
+    if (!solid[p0] || seen2[p0]) continue
+    const stack = [p0], cells: number[] = []
+    seen2[p0] = 1
+    let x1 = W, y1 = H, x2 = 0, y2 = 0
+    while (stack.length) { const p = stack.pop()!, x = p % W, y = (p / W) | 0; cells.push(p); if (x < x1) x1 = x; if (x > x2) x2 = x; if (y < y1) y1 = y; if (y > y2) y2 = y; for (const q of [p - 1, p + 1, p - W, p + W]) if (solid[q] && !seen2[q]) { seen2[q] = 1; stack.push(q) } }
+    regions.push({ label: -1, cells, box: { x1, y1, x2, y2 }, edge: false, kind: "solid" })
   }
 
-  // Ekstraksi komponen terhubung (connected components)
-  const extractBoxes = (target: number, minCells: number): Box[] => {
-    const seen = new Uint8Array(W * H)
-    const boxes: Box[] = []
-    for (let y = 2; y < H - 2; y++) {
-      for (let x = 2; x < W - 2; x++) {
-        const start = y * W + x
-        if (seen[start] || cls[start] !== target) continue
-        const q = [start]
-        seen[start] = 1
-        let minX = x, maxX = x, minY = y, maxY = y, count = 0
-        while (q.length) {
-          const cur = q.pop()!
-          const cy = Math.floor(cur / W), cx = cur % W
-          count++
-          if (cx < minX) minX = cx; if (cx > maxX) maxX = cx
-          if (cy < minY) minY = cy; if (cy > maxY) maxY = cy
-          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
-            const nx = cx + dx, ny = cy + dy
-            if (nx < 1 || nx >= W - 1 || ny < 1 || ny >= H - 1) continue
-            const ni = ny * W + nx
-            if (!seen[ni] && cls[ni] === target) { seen[ni] = 1; q.push(ni) }
-          }
-        }
-        if (count < minCells) continue
-        const bw = maxX - minX + 1, bh = maxY - minY + 1
-        const fillRatio = count / (bw * bh)
-        // Pecah blok yang terlalu besar (mis. gedung bentuk U/L) menjadi sayap bangunan
-        if (target === 1 && (bw > W * 0.48 || bh > H * 0.45) && fillRatio < 0.58) {
-          const mx = Math.floor((minX + maxX) / 2), my = Math.floor((minY + maxY) / 2)
-          const quads: [number, number, number, number][] = [
-            [minX, minY, mx - 1, my - 1], [mx + 1, minY, maxX, my - 1],
-            [minX, my + 1, mx - 1, maxY], [mx + 1, my + 1, maxX, maxY],
-          ]
-          for (const [qx1, qy1, qx2, qy2] of quads) {
-            let sub = 0
-            for (let sy = qy1; sy <= qy2; sy++) for (let sx = qx1; sx <= qx2; sx++) if (cls[sy * W + sx] === target) sub++
-            if (sub >= minCells) {
-              const x1 = gxToM(qx1), x2 = gxToM(qx2 + 1), y1 = gyToM(qy2 + 1), y2 = gyToM(qy1)
-              boxes.push({ x1, y1, x2, y2, area: (x2 - x1) * (y2 - y1), score: sub })
-            }
-          }
-        } else {
-          const x1 = gxToM(minX), x2 = gxToM(maxX + 1), y1 = gyToM(maxY + 1), y2 = gyToM(minY)
-          boxes.push({ x1, y1, x2, y2, area: (x2 - x1) * (y2 - y1), score: count })
-        }
+  // 5) latar luar & penyaringan (label 0 = sewarna latar)
+  const bgLabel = 0
+  const bwOf = (r: Region) => r.box.x2 - r.box.x1 + 1, bhOf = (r: Region) => r.box.y2 - r.box.y1 + 1
+  const maxOuter = Math.max(0, ...regions.filter((r) => r.edge && r.label === bgLabel).map((r) => r.cells.length))
+  const minCells = Math.max(60, Math.round(N * 0.0018))
+  const cand = regions.filter((r) => {
+    if (r.cells.length < minCells) return false
+    if (r.label === bgLabel && r.edge && r.cells.length >= maxOuter * 0.4) return false // latar luar
+    if (r.edge && Math.max(bwOf(r), bhOf(r)) / Math.min(bwOf(r), bhOf(r)) > 4) return false // jalan di tepi
+    if (bwOf(r) * bhOf(r) > N * 0.85) return false
+    if (r.kind !== "solid" && r.label !== bgLabel && r.cells.length < N * 0.01 && r.cells.length / (bwOf(r) * bhOf(r)) < 0.3) return false // cincin/halo tipis
+    if (Math.min(bwOf(r), bhOf(r)) < Math.max(4, Math.max(W, H) * 0.008)) return false // garis/strip tipis
+    return true
+  })
+  for (const r of cand) {
+    if (r.kind === "solid") continue
+    const [R, G, B] = r.mean!
+    const { h, s, v } = rgbToHsv(R, G, B)
+    r.kind = r.label === bgLabel ? "white"
+      : h >= 175 && h <= 250 && s > 0.2 ? "water"
+      : h >= 70 && h <= 170 && s >= 0.25 ? "veg"
+      : (h >= 45 && h < 68 && s >= 0.32 && v > 0.7) || (s < 0.1 && v > 0.45 && v < 0.88) ? "paved"
+      : "building"
+  }
+  const inside = (o: Region, r: Region) => { const ox = (o.box.x1 + o.box.x2) / 2, oy = (o.box.y1 + o.box.y2) / 2; return o !== r && ox > r.box.x1 && ox < r.box.x2 && oy > r.box.y1 && oy < r.box.y2 }
+  // area putih/latar yang membungkus ≥ 2 objek lain = halaman dalam batas lahan (bukan objek)
+  const sites = cand.filter((r) => r.kind === "white" && cand.filter((o) => inside(o, r) && o.cells.length < r.cells.length).length >= 2)
+  let objs = cand.filter((r) => !sites.includes(r) && !(r.kind === "white" && r.cells.length / (bwOf(r) * bhOf(r)) < 0.35))
+  // objek yang terlalu besar dibanding yang lain dan bukan putih (mis. latar berwarna) dibuang
+  if (!objs.length) throw new Error("Tidak ada ruang, gedung, atau area yang terdeteksi. Pakai gambar denah yang lebih jelas (garis/kotak kontras) atau isi Kunci API Gemini di Konfigurasi.")
+
+  // 6) nama dari OCR per objek: potong area tiap ruang dari gambar asli, perbesar, baca sebagai satu blok teks
+  if (opts.ocr !== false && objs.length) {
+    try {
+      say("Membaca nama ruang (OCR)…")
+      const T: any = await import("tesseract.js")
+      const worker = await T.createWorker("ind")
+      await worker.setParameters({ tessedit_pageseg_mode: "6" })
+      const crop = document.createElement("canvas")
+      const read = async (r: Region, rotate: boolean) => {
+        const ox = Math.max(0, r.box.x1 / k + 1), oy = Math.max(0, r.box.y1 / k + 1)
+        const ow = Math.max(4, (r.box.x2 - r.box.x1 + 1) / k - 2), oh = Math.max(4, (r.box.y2 - r.box.y1 + 1) / k - 2)
+        const u = Math.max(1, Math.min(4, 900 / Math.max(ow, oh)))
+        const cw = Math.round(ow * u), ch = Math.round(oh * u)
+        crop.width = rotate ? ch : cw; crop.height = rotate ? cw : ch
+        const g = crop.getContext("2d")!
+        g.fillStyle = "#fff"; g.fillRect(0, 0, crop.width, crop.height)
+        g.save()
+        if (rotate) { g.translate(ch, 0); g.rotate(Math.PI / 2) }
+        g.imageSmoothingQuality = "high"
+        g.drawImage(img, ox, oy, ow, oh, 0, 0, cw, ch)
+        g.restore()
+        const { data } = await worker.recognize(crop)
+        const ws = ((data?.words ?? []) as any[])
+          .map((w) => ({ t: String(w.text ?? "").replace(/[^\p{L}\p{N}/&.\-]/gu, ""), c: Number(w.confidence) || 0 }))
+          .filter((w) => w.t && w.c >= 55 && (/[\p{L}]{2}/u.test(w.t) || /^\d{1,3}$|^[IVX]+(-?[A-Z])?$/i.test(w.t)))
+        const text = ws.map((w) => w.t).join(" ").replace(/\s+/g, " ").trim().slice(0, 48)
+        const score = ws.reduce((sum, w) => sum + w.c * w.t.length, 0)
+        return { text, score }
       }
-    }
-    return boxes.sort((a, b) => b.score - a.score)
+      const targets = [...objs].sort((a, b) => b.cells.length - a.cells.length).slice(0, 60)
+      let i = 0
+      for (const r of targets) {
+        say(`Membaca nama ruang (OCR) ${++i}/${targets.length}…`)
+        let best = await read(r, false)
+        // ruang tinggi-sempit sering berlabel tegak → coba diputar
+        if (bhOf(r) > bwOf(r) * 1.4 && best.score < 400) { const alt = await read(r, true); if (alt.score > best.score) best = alt }
+        const clean = best.text.replace(/^(\d\s+)+(?=\p{L})/u, "").trim() // titik/ikon kecil terbaca sebagai angka di depan
+        if (clean && /[\p{L}]{2}/u.test(clean)) r.name = clean
+      }
+      await worker.terminate()
+    } catch { /* OCR opsional (mis. luring) — nama otomatis dipakai */ }
+  }
+  // putih tertutup & besar tanpa nama gedung = halaman
+  const contentArea = (() => { const xs = [...objs, ...sites]; return Math.max(1, (Math.max(...xs.map((r) => r.box.x2)) - Math.min(...xs.map((r) => r.box.x1))) * (Math.max(...xs.map((r) => r.box.y2)) - Math.min(...xs.map((r) => r.box.y1)))) })()
+  objs = objs.filter((r) => r.cells.length >= minCells * 1.5 || r.name)
+
+  // 7) skala & proyeksi
+  const site = sites.sort((a, b) => b.cells.length - a.cells.length)[0]
+  const all = [...objs, ...(site ? [site] : [])]
+  const bx1 = Math.min(...all.map((r) => r.box.x1)), by1 = Math.min(...all.map((r) => r.box.y1))
+  const bx2 = Math.max(...all.map((r) => r.box.x2)) + 1, by2 = Math.max(...all.map((r) => r.box.y2)) + 1
+  const mPerCell = Math.min(5, Math.max(0.02, Math.sqrt((opts.landM2 || 12000) / Math.max(1, (bx2 - bx1) * (by2 - by1)))))
+  const mx = (bx1 + bx2) / 2, my = (by1 + by2) / 2
+  const ll = (gx: number, gy: number) => toLatLng(opts.center, (gx - mx) * mPerCell, (my - gy) * mPerCell)
+  const poly = (r: Rect): [number, number][] => [ll(r.x1, r.y2 + 1), ll(r.x2 + 1, r.y2 + 1), ll(r.x2 + 1, r.y1), ll(r.x1, r.y1)]
+  const rectsOf = (r: Region): Rect[] => {
+    let holes = 0
+    for (let y = r.box.y1; y <= r.box.y2; y++) for (let x = r.box.x1; x <= r.box.x2; x++) if (dark[at(x, y)]) holes++
+    if ((r.cells.length + holes) / (bwOf(r) * bhOf(r)) >= 0.6) return [r.box]
+    return toRectsOf(r.cells, r.box, W)
   }
 
-  const overlap = (a: Box, b: Box, pad = 2) =>
-    !(a.x2 + pad < b.x1 || a.x1 - pad > b.x2 || a.y2 + pad < b.y1 || a.y1 - pad > b.y2)
-
-  const clampBox = (b: Box, minW: number, maxW: number, minH: number, maxH: number): Box => {
-    const cx = (b.x1 + b.x2) / 2, cy = (b.y1 + b.y2) / 2
-    const w = Math.min(maxW, Math.max(minW, b.x2 - b.x1))
-    const h = Math.min(maxH, Math.max(minH, b.y2 - b.y1))
-    const x1 = Math.max(-halfW * 0.9, Math.min(halfW * 0.9 - w, cx - w / 2))
-    const y1 = Math.max(-halfH * 0.88, Math.min(halfH * 0.88 - h, cy - h / 2))
-    return { x1, y1, x2: x1 + w, y2: y1 + h, area: w * h, score: b.score }
+  const counters: Record<string, number> = {}
+  const used = new Set(objs.map((r) => r.name).filter(Boolean))
+  const autoName = (t: SiteFeatureType): string => {
+    counters[t] = (counters[t] ?? 0) + 1
+    const n = counters[t]
+    const nm = t === "field" ? (n === 1 ? "Lapangan / halaman" : `Halaman ${n}`) : t === "garden" ? `Taman ${n}` : t === "water" ? (n === 1 ? "Kolam / air" : `Air ${n}`) : t === "parking" ? (n === 1 ? "Perkerasan / parkir" : `Perkerasan ${n}`) : `Gedung ${n}`
+    return used.has(nm) ? autoName(t) : nm
   }
-
-  // 1. Hijau (Lapangan & Kebun)
-  const rawGreen = extractBoxes(2, 16)
-  const placed: Box[] = []
-  const greenFeatures: SiteFeature[] = []
-  for (const g of rawGreen.slice(0, 4)) {
-    const cb = clampBox(g, 14 * scale, 48 * scale, 12 * scale, 34 * scale)
-    if (placed.some((p) => overlap(p, cb, 1.5))) continue
-    placed.push(cb)
-    const isField = greenFeatures.length === 0
-    greenFeatures.push({
-      type: isField ? "field" : "garden",
-      name: isField ? "Lapangan upacara" : greenFeatures.length === 1 ? "Kebun sekolah" : `Taman ${greenFeatures.length}`,
-      coords: rectCoords(cb.x1, cb.y1, cb.x2, cb.y2),
-    })
+  const features: SiteFeature[] = []
+  const ordered = [...objs].sort((a, b) => a.box.y1 - b.box.y1 || a.box.x1 - b.box.x1)
+  for (const r of ordered) {
+    let type: SiteFeatureType = r.kind === "veg" ? "garden" : r.kind === "water" ? "water" : r.kind === "paved" ? "parking" : "building"
+    if (r.kind === "white" && r.cells.length > contentArea * 0.06 && !r.name) type = "field"
+    if (r.kind === "veg" && r.cells.length > contentArea * 0.08) type = "field"
+    const byName = r.name ? typeFromName(r.name) : null
+    if (byName) type = byName
+    const name = r.name || autoName(type)
+    if (type === "gate") { features.push({ type, name, coords: [ll((r.box.x1 + r.box.x2) / 2, (r.box.y1 + r.box.y2) / 2)] }); continue }
+    for (const rc of rectsOf(r)) features.push({ type, name, coords: poly(rc) })
   }
-  // Pastikan minimal ada 1 lapangan & 1 kebun bila gambar minim warna hijau
-  if (greenFeatures.length === 0) {
-    const fb: Box = { x1: -18 * scale, y1: -24 * scale, x2: 22 * scale, y2: 2 * scale, area: 1000, score: 1 }
-    placed.push(fb)
-    greenFeatures.push({ type: "field", name: "Lapangan upacara", coords: rectCoords(fb.x1, fb.y1, fb.x2, fb.y2) })
-    const gb: Box = { x1: 30 * scale, y1: -26 * scale, x2: 52 * scale, y2: -8 * scale, area: 400, score: 1 }
-    placed.push(gb)
-    greenFeatures.push({ type: "garden", name: "Kebun sekolah", coords: rectCoords(gb.x1, gb.y1, gb.x2, gb.y2) })
-  }
-
-  // 2. Bangunan (Gedung sekolah)
-  const rawBuildings = extractBoxes(1, 10)
-  const buildingBoxes: Box[] = []
-  for (const b of rawBuildings) {
-    if (buildingBoxes.length >= 10) break
-    const cb = clampBox(b, 10 * scale, 42 * scale, 8 * scale, 22 * scale)
-    if (placed.some((p) => overlap(p, cb, 2))) continue
-    placed.push(cb)
-    buildingBoxes.push(cb)
-  }
-  // Bila gambar terlalu polos hingga < 3 gedung terdeteksi, lengkapi sayap gedung di sekitar lapangan
-  const fallbackWings: [number, number, number, number][] = [
-    [-48, 26, -8, 38], [4, 26, 44, 38], [-48, 4, -30, 20], [32, 4, 52, 22], [-52, -42, -34, -30], [38, -42, 52, -30],
-  ]
-  for (const [x1, y1, x2, y2] of fallbackWings) {
-    if (buildingBoxes.length >= 5) break
-    const cb: Box = { x1: x1 * scale, y1: y1 * scale, x2: x2 * scale, y2: y2 * scale, area: (x2 - x1) * (y2 - y1), score: 1 }
-    if (placed.some((p) => overlap(p, cb, 2))) continue
-    placed.push(cb)
-    buildingBoxes.push(cb)
-  }
-
-  // Urutkan gedung dari Utara ke Selatan, Barat ke Timur agar penamaan konsisten
-  buildingBoxes.sort((a, b) => b.y2 - a.y2 || a.x1 - b.x1)
-  const buildingFeatures: SiteFeature[] = buildingBoxes.map((b, i) => ({
-    type: "building",
-    name: BUILDING_NAMES[i] ?? `Gedung ${i + 1}`,
-    coords: rectCoords(b.x1, b.y1, b.x2, b.y2),
-  }))
-
-  // 3. Air / Kolam (bila terdeteksi pada gambar)
-  const waterFeatures: SiteFeature[] = []
-  for (const w of extractBoxes(3, 12).slice(0, 2)) {
-    const cb = clampBox(w, 8 * scale, 24 * scale, 6 * scale, 16 * scale)
-    if (placed.some((p) => overlap(p, cb, 1.5))) continue
-    placed.push(cb)
-    waterFeatures.push({ type: "water", name: waterFeatures.length === 0 ? "Kolam / Drainase" : "Tandon Air", coords: rectCoords(cb.x1, cb.y1, cb.x2, cb.y2) })
-  }
-
-  // 4. Area Parkir
-  const rawParking = extractBoxes(4, 18)
-  let parkingFeature: SiteFeature | null = null
-  for (const p of rawParking) {
-    const cb = clampBox(p, 12 * scale, 26 * scale, 10 * scale, 20 * scale)
-    if (!placed.some((x) => overlap(x, cb, 1.5))) {
-      placed.push(cb)
-      parkingFeature = { type: "parking", name: "Parkir", coords: rectCoords(cb.x1, cb.y1, cb.x2, cb.y2) }
-      break
-    }
-  }
-  if (!parkingFeature) {
-    const pb: Box = { x1: -54 * scale, y1: -26 * scale, x2: -32 * scale, y2: -8 * scale, area: 396, score: 1 }
-    if (!placed.some((x) => overlap(x, pb, 1))) parkingFeature = { type: "parking", name: "Parkir", coords: rectCoords(pb.x1, pb.y1, pb.x2, pb.y2) }
-  }
-
-  // 5. Batas lahan, jalur sirkulasi, dan gerbang
-  const allX = placed.flatMap((b) => [b.x1, b.x2]), allY = placed.flatMap((b) => [b.y1, b.y2])
-  const minX = Math.min(-56 * scale, ...allX) - 6 * scale
-  const maxX = Math.max(56 * scale, ...allX) + 6 * scale
-  const minY = Math.min(-46 * scale, ...allY) - 6 * scale
-  const maxY = Math.max(44 * scale, ...allY) + 6 * scale
-  const gateX = 2 * scale
-
-  const boundary: SiteFeature = {
-    type: "boundary",
-    name: "Batas lahan",
-    coords: [
-      toLatLng(opts.center, minX, minY),
-      toLatLng(opts.center, maxX, minY),
-      toLatLng(opts.center, maxX + 1.5 * scale, maxY),
-      toLatLng(opts.center, minX + 1.5 * scale, maxY + 1.5 * scale),
-    ],
-  }
-  const paths: SiteFeature[] = [
-    { type: "path", coords: [toLatLng(opts.center, gateX, minY), toLatLng(opts.center, gateX, maxY * 0.55)] },
-    { type: "path", coords: [toLatLng(opts.center, minX * 0.85, 3 * scale), toLatLng(opts.center, maxX * 0.88, 3 * scale)] },
-  ]
-  const gate: SiteFeature = { type: "gate", name: "Gerbang", coords: [toLatLng(opts.center, gateX, minY)] }
-
-  const features: SiteFeature[] = [
-    boundary,
-    ...greenFeatures,
-    ...(parkingFeature ? [parkingFeature] : []),
-    ...waterFeatures,
-    ...paths,
-    ...buildingFeatures,
-    gate,
-  ]
-
+  const boundary: SiteFeature = { type: "boundary", name: "Batas lahan", coords: poly({ x1: bx1, y1: by1, x2: bx2 - 1, y2: by2 - 1 }) }
+  const order: SiteFeatureType[] = ["field", "garden", "parking", "water", "building", "gate"]
+  features.sort((a, b) => order.indexOf(a.type) - order.indexOf(b.type))
   return {
-    features,
-    summary: { buildings: buildingFeatures.length, green: greenFeatures.length, water: waterFeatures.length, paths: paths.length, mode: "ai-vision" },
+    features: [boundary, ...features],
+    summary: { buildings: features.filter((f) => f.type === "building").length, green: features.filter((f) => f.type === "field" || f.type === "garden").length, water: features.filter((f) => f.type === "water").length, paths: 0, mode: "ai-vision" },
     dataUrl,
   }
+}
+
+/** Pecah bentuk L/U menjadi beberapa persegi (gabungan baris dengan rentang sama). */
+function toRectsOf(cells: number[], box: Rect, W: number): Rect[] {
+  const bw = box.x2 - box.x1 + 1, bh = box.y2 - box.y1 + 1
+  const grid = new Uint8Array(bw * bh)
+  for (const p of cells) grid[(((p / W) | 0) - box.y1) * bw + (p % W) - box.x1] = 1
+  const rects: Rect[] = []
+  let open: Rect[] = []
+  for (let y = 0; y < bh; y++) {
+    const runs: [number, number][] = []
+    for (let x = 0; x < bw; x++) if (grid[y * bw + x]) { const s0 = x; while (x + 1 < bw && grid[y * bw + x + 1]) x++; runs.push([s0, x]) }
+    const next: Rect[] = []
+    for (const [a, b] of runs) {
+      const i = open.findIndex((r) => Math.abs(r.x1 - (a + box.x1)) <= 2 && Math.abs(r.x2 - (b + box.x1)) <= 2)
+      if (i >= 0) { const r = open.splice(i, 1)[0]; r.y2 = y + box.y1; next.push(r) }
+      else next.push({ x1: a + box.x1, x2: b + box.x1, y1: y + box.y1, y2: y + box.y1 })
+    }
+    rects.push(...open); open = next
+  }
+  rects.push(...open)
+  const big = rects.filter((r) => (r.x2 - r.x1 + 1) * (r.y2 - r.y1 + 1) >= Math.max(12, cells.length * 0.08))
+  return big.length && big.length <= 6 ? big : [box]
 }
 
 /** Putar seluruh denah GIS (mis. 90° searah jarum jam) terhadap titik pusat. */

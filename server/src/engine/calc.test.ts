@@ -33,7 +33,7 @@ describe("Kalk_Sampah: sesi 8 hari → rata-rata", () => {
 
 describe("Kalk_Mobilitas", () => {
   const S = 6
-  const r = (count: number, mode: string, d: number, f: 1 | 2, o: number) => ({ count, factor: fe(mode), distanceKm: d, escort: f, occupants: o, daysPerWeek: 6 })
+  const r = (count: number, mode: string, d: number, f: 1 | 2, o: number) => ({ count, factor: fe(mode), dailyKm: 2 * d * f, occupants: o, daysPerWeek: 6 })
   const resps = [
     r(120, "TR_MOTOR", 4, 1, 1), r(80, "TR_MOTOR", 5, 1, 2), r(150, "TR_MOTOR", 3, 2, 1), r(60, "TR_MOTOR", 4, 1, 1),
     r(10, "TR_SEDAN", 6, 2, 1), r(40, "TR_ANGKOT", 5, 1, 8), r(185, "TR_AKTIF", 1, 1, 1),

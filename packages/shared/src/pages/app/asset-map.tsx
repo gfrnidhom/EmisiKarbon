@@ -56,6 +56,7 @@ export default function AssetMap() {
   const [openAi, setOpenAi] = useState(false)
   const [imgUrl, setImgUrl] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState("")
   const [preview, setPreview] = useState<SiteFeature[] | null>(null)
   const [modeLabel, setModeLabel] = useState<string>("")
   const fileRef = useRef<HTMLInputElement>(null)
@@ -94,21 +95,21 @@ export default function AssetMap() {
       // Coba AI Vision server terlebih dahulu bila GEMINI_API_KEY tersedia; otomatis fallback ke AI Vision lokal
       const srv = await api<any>(`/orgs/${orgId}/gis-ai`, {
         method: "POST",
-        json: { dataUrl, center, landM2: org?.land_m2 || 12000 },
-      }).catch(() => ({ fallback: true }))
+        json: { dataUrl, center, landM2: org?.land_m2 || 12000, aspect: await new Promise<number>((ok) => { const im = new Image(); im.onload = () => ok(im.naturalWidth / Math.max(1, im.naturalHeight)); im.onerror = () => ok(1); im.src = dataUrl }) },
+      }).catch((e: Error) => ({ fallback: true, reason: e.message }))
       if (srv?.features?.length) {
         setPreview(srv.features)
         setModeLabel(tl("AI Vision (Gemini)", "AI Vision (Gemini)"))
       } else {
-        const res = await analyzeImageToGis(dataUrl, { center, landM2: org?.land_m2 || 12000 })
+        const res = await analyzeImageToGis(dataUrl, { center, landM2: org?.land_m2 || 12000, onProgress: setProgress })
         setPreview(res.features)
-        setModeLabel(tl("AI Vision Vektorisasi", "AI Vision Vectorizer"))
+        setModeLabel(tl("Vektorisasi lokal", "Local vectorizer") + (srv?.reason ? ` · ${srv.reason}` : ""))
       }
-      toast.success(tl("Gambar berhasil diubah menjadi denah GIS", "Image converted to GIS site plan"))
+      toast.success(tl("Gambar berhasil diubah menjadi denah GIS — periksa & ubah nama objek bila perlu", "Image converted to a GIS plan — review and rename objects if needed"))
     } catch (e: any) {
       toast.error(e?.message ?? tl("Gagal memproses gambar", "Failed to process image"))
     } finally {
-      setBusy(false)
+      setBusy(false); setProgress("")
     }
   }
 
@@ -210,7 +211,7 @@ export default function AssetMap() {
               </span>
               <div className="text-sm">
                 <div className="font-medium">{tl("Pilih atau seret gambar denah / citra satelit ke sini", "Choose or drop a floor plan / satellite image here")}</div>
-                <div className="text-xs text-muted-foreground">{tl("Format PNG, JPG, WebP, atau SVG · otomatis diproyeksikan ke koordinat GPS sekolah", "PNG, JPG, WebP, or SVG · automatically projected to school GPS coordinates")}</div>
+                <div className="text-xs text-muted-foreground">{busy ? (progress || tl("Memproses…", "Processing…")) : tl("Denah garis, denah kotak berwarna, atau citra satelit (PNG, JPG, WebP, SVG). Nama ruang dibaca otomatis dari tulisan di denah.", "Line plans, coloured-box plans or satellite images (PNG, JPG, WebP, SVG). Room names are read from the text on the plan.")}</div>
               </div>
             </div>
             <Button type="button" variant="outline" className="border-primary text-primary hover:text-primary" disabled={busy} onClick={() => fileRef.current?.click()}>

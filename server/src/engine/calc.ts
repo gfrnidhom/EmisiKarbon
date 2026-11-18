@@ -30,18 +30,17 @@ export function wasteDaily(k: number, nNow: number, nBaseline: number, avgs: Was
   return k * ratio * avgs.reduce((s, a) => s + a.kgPerDay * a.factor, 0)
 }
 
-/** §7.8 Mobilitas: km kendaraan */
+/** §7.8 Mobilitas: km per hari aktif = jarak harian ÷ penumpang × (hari/minggu ÷ hari sekolah) */
 export interface MobilityResp {
-  distanceKm: number // jarak sekali jalan
-  escort: 1 | 2 // f_antar
-  occupants: number // o
+  dailyKm: number // jarak harian: total km pulang-pergi per hari (termasuk perjalanan pengantar)
+  occupants: number // o (1 untuk faktor per penumpang-km)
   factor: number // FE moda kg CO2e/km
   daysPerWeek: number // h
   count?: number // jumlah orang yang diwakili baris ini (default 1)
 }
 export function mobilityKm(r: MobilityResp, schoolDays: number) {
   const n = r.count ?? 1
-  return (n * 2 * r.distanceKm * r.escort) / Math.max(r.occupants, 1) * (r.daysPerWeek / schoolDays)
+  return (n * r.dailyKm) / Math.max(r.occupants, 1) * (r.daysPerWeek / schoolDays)
 }
 export function mobilityDaily(resps: MobilityResp[], schoolDays: number, nPopulation: number) {
   const nResp = resps.reduce((s, r) => s + (r.count ?? 1), 0)

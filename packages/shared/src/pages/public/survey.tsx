@@ -2,23 +2,16 @@ import { useState } from "react"
 import { useParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { Bike, Bus, Car, CheckCircle2, Footprints, ShieldCheck } from "lucide-react"
+import { CheckCircle2, ShieldCheck } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Field, PageSkeleton, SimpleSelect, Spinner, EmptyState } from "@/components/common"
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import { t } from "@/lib/i18n"
+import { t, tl } from "@/lib/i18n"
+import { MOBILITY_MODES } from "@/lib/mobility-modes"
 
-const MODES = [
-  { v: "jalan", label: t("Jalan kaki"), icon: Footprints },
-  { v: "sepeda", label: t("Sepeda"), icon: Bike },
-  { v: "motor", label: t("Sepeda motor"), icon: Bike },
-  { v: "mobil", label: t("Mobil"), icon: Car },
-  { v: "angkot", label: t("Angkot"), icon: Bus },
-  { v: "bus", label: t("Bus sekolah"), icon: Bus },
-]
 function deviceId() {
   try {
     let id = localStorage.getItem("jh.device")
@@ -32,16 +25,16 @@ export default function Survey() {
   const { data, isLoading, error } = useQuery({ queryKey: ["survey", token], queryFn: () => api<any>(`/public/surveys/${token}`) })
   const doneKey = `jh.survey.${token}`
   const [done, setDone] = useState(() => { try { return !!localStorage.getItem(doneKey) } catch { return false } })
-  const [f, setF] = useState({ class_name: "", role: "siswa", mode: "", distance_km: "", escort: "1", occupants: "1", days_per_week: "6" })
+  const [f, setF] = useState({ class_name: "", role: "siswa", mode: "", daily_km: "", occupants: "1", days_per_week: "6" })
   const [busy, setBusy] = useState(false)
   const set = (k: string, v: string) => setF((s) => ({ ...s, [k]: v }))
-  const motorized = ["motor", "mobil"].includes(f.mode)
+  const motorized = !!MOBILITY_MODES.find((m) => m.v === f.mode)?.private
 
   const submit = async (confirmFar = false) => {
-    if (!f.mode || !f.distance_km) return toast.error(t("Lengkapi moda dan jarak"))
+    if (!f.mode || f.daily_km === "") return toast.error(tl("Lengkapi moda dan jarak harian", "Fill in the mode and daily distance"))
     setBusy(true)
     try {
-      await api(`/public/surveys/${token}`, { method: "POST", json: { ...f, distance_km: Number(f.distance_km), escort: Number(f.escort), occupants: Number(f.occupants), days_per_week: Number(f.days_per_week), device_id: deviceId(), confirm_far: confirmFar } })
+      await api(`/public/surveys/${token}`, { method: "POST", json: { ...f, daily_km: Number(f.daily_km), occupants: Number(f.occupants), days_per_week: Number(f.days_per_week), device_id: deviceId(), confirm_far: confirmFar } })
       try { localStorage.setItem(doneKey, "1") } catch { /* noop */ }
       setDone(true)
     } catch (e: any) {
@@ -74,31 +67,19 @@ export default function Survey() {
               </div>
               <Field label={t("Biasanya ke sekolah naik apa?")}>
                 <div className="grid grid-cols-3 gap-2">
-                  {MODES.map((m) => (
+                  {MOBILITY_MODES.map((m) => (
                     <button key={m.v} type="button" onClick={() => set("mode", m.v)}
                       className={cn("flex min-h-20 flex-col items-center justify-center gap-1.5 rounded-xl border bg-card p-2 text-xs transition-all", f.mode === m.v ? "border-primary bg-primary/10 text-primary ring-2 ring-primary/30" : "hover:border-primary/40")}>
-                      <m.icon className="size-6" />{m.label}
+                      <m.icon className="size-6" /><span className="text-center leading-tight">{tl(m.id, m.en)}</span>
                     </button>
                   ))}
                 </div>
               </Field>
-              <Field label={t("Jarak rumah → sekolah (sekali jalan)")} hint={t("Perkiraan saja. Alamat tidak disimpan.")}>
-                <div className="flex items-center gap-2"><Input type="number" inputMode="decimal" min={0} step="0.1" value={f.distance_km} onChange={(e) => set("distance_km", e.target.value)} className="h-11 text-lg" /><span className="text-sm text-muted-foreground">{t("km")}</span></div>
+              <Field label={tl("Jarak harian (pulang-pergi)", "Daily distance (round trip)")} hint={tl("Total km dalam sehari: rumah → sekolah → rumah. Bila diantar lalu pengantar pulang dan menjemput lagi, jumlahkan juga perjalanan pengantar. Perkiraan saja, alamat tidak disimpan.", "Total km in one day: home → school → home. If someone drops you off and goes back, add their trips too. An estimate is fine; no address is stored.")}>
+                <div className="flex items-center gap-2"><Input type="number" inputMode="decimal" min={0} step="0.1" value={f.daily_km} onChange={(e) => set("daily_km", e.target.value)} className="h-11 text-lg" placeholder={tl("mis. 8", "e.g. 8")} /><span className="shrink-0 text-sm text-muted-foreground">{tl("km / hari", "km / day")}</span></div>
               </Field>
               {motorized && (
                 <>
-                  <Field label={t("Siapa yang mengendarai?")}>
-                    <div className="grid gap-2">
-                      {[
-                        { v: "1", t: t("Saya sendiri / kendaraan parkir di sekolah"), d: t("atau pengantar lanjut ke tempat kerja searah") },
-                        { v: "2", t: t("Diantar, pengantar pulang lalu menjemput lagi"), d: t("dihitung bolak-balik dua kali") },
-                      ].map((o) => (
-                        <button key={o.v} type="button" onClick={() => set("escort", o.v)} className={cn("rounded-xl border p-3 text-left text-sm", f.escort === o.v ? "border-primary bg-primary/10" : "")}>
-                          <div className="font-medium">{o.t}</div><div className="text-xs text-muted-foreground">{o.d}</div>
-                        </button>
-                      ))}
-                    </div>
-                  </Field>
                   <Field label={t("Berapa orang (ke sekolah ini) dalam satu kendaraan?")} hint={t("Termasuk kamu, mis. berboncengan dengan kakak = 2")}>
                     <SimpleSelect value={f.occupants} onChange={(v) => set("occupants", v)} options={["1", "2", "3", "4", "5"].map((n) => ({ value: n, label: `${n} orang` }))} className="h-11" />
                   </Field>

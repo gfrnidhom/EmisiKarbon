@@ -372,13 +372,15 @@ pub.post("/surveys/:token", async (c) => {
   if (!s || s.status !== "aktif") throw bad("Survei tidak aktif", 409)
   const b = await c.req.json()
   if (!MODE_FACTOR[b.mode]) throw bad("Moda tidak dikenal")
-  const d = Number(b.distance_km)
-  if (!(d >= 0)) throw bad("Jarak tidak valid")
-  if (d > 50 && !b.confirm_far) throw bad("Jarak > 50 km — mohon konfirmasi", 422)
+  // jarak harian = total km pulang-pergi per hari (klien lama mengirim distance_km sekali jalan + escort)
+  const d = b.daily_km !== undefined ? Number(b.daily_km) : 2 * Number(b.distance_km) * (b.escort === 2 ? 2 : 1)
+  if (!(d >= 0)) throw bad("Jarak harian tidak valid")
+  const far = b.mode === "pesawat" ? 8000 : b.mode === "kereta" ? 400 : 100
+  if (d > far && !b.confirm_far) throw bad(`Jarak harian > ${far} km — mohon konfirmasi`, 422)
   const device = sha256(`${s.id}:${b.device_id ?? c.req.header("user-agent")}`)
   try {
-    (await q.run("INSERT INTO mobility_responses(survey_id, class_name, role, mode, distance_km, escort, occupants, days_per_week, device_hash, flags) VALUES (?,?,?,?,?,?,?,?,?,?)",
-      s.id, b.class_name ?? null, b.role ?? "siswa", b.mode, d, b.escort === 2 ? 2 : 1, Math.max(Number(b.occupants ?? 1), 1), Math.min(Math.max(Number(b.days_per_week ?? 6), 1), 7), device, JSON.stringify(d > 50 ? ["Jarak > 50 km"] : [])))
+    (await q.run("INSERT INTO mobility_responses(survey_id, class_name, role, mode, daily_km, distance_km, escort, occupants, days_per_week, device_hash, flags) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+      s.id, b.class_name ?? null, b.role ?? "siswa", b.mode, d, d / 2, 1, Math.min(Math.max(Number(b.occupants ?? 1), 1), 60), Math.min(Math.max(Number(b.days_per_week ?? 6), 1), 7), device, JSON.stringify(d > far ? [`Jarak harian > ${far} km`] : [])))
   } catch {
     throw bad("Perangkat ini sudah mengisi survei", 409)
   }

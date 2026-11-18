@@ -2,7 +2,8 @@
 import { Hono } from "hono"
 import { q, json } from "../db"
 import { addDays, assertOrg, assertOrgRole, audit, bad, daysBetween, monthOf, qrSign, qrVerify, randomToken, requireAuth, sha256, todayWIB, parseJsonCols, rowId } from "../lib"
-import { buildTree, computeAvoided, loadContext, loadTrees, mobilityFromSurvey, speciesEq, treeAbsorption, treeAt, treeDaily, treeStock, computeRange, MODE_FACTOR } from "../engine/engine"
+import { MODES } from "../engine/modes"
+import { buildTree, computeAvoided, loadContext, loadTrees, mobilityFromSurvey, speciesEq, treeAbsorption, treeAt, treeDaily, treeStock, computeRange, MODE_FACTOR, toMobilityResp } from "../engine/engine"
 import { assetEco, dataStartDate, markDirty, readDays, sumEco } from "../engine/ledger"
 import * as C from "../engine/calc"
 
@@ -273,7 +274,7 @@ field.get("/orgs/:orgId/mobility", async (c) => {
     })
     const byMode: Record<string, { n: number; km: number; kg: number }> = {}
     for (const r of resps) {
-      const resp = { distanceKm: r.distance_km, escort: r.escort === 2 ? 2 as const : 1 as const, occupants: r.mode === "angkot" ? Math.max(r.occupants, 8) : r.occupants, factor: ctx.fe[MODE_FACTOR[r.mode]]?.value ?? 0, daysPerWeek: r.days_per_week, count: r.count }
+      const resp = toMobilityResp(r, ctx.fe, ctx.org.school_days_per_week ?? 6)
       const km = C.mobilityKm(resp, ctx.org.school_days_per_week ?? 6)
       const m = (byMode[r.mode] ??= { n: 0, km: 0, kg: 0 })
       m.n += r.count ?? 1; m.km += km; m.kg += km * resp.factor
@@ -281,7 +282,11 @@ field.get("/orgs/:orgId/mobility", async (c) => {
     const result = resps.length ? mobilityFromSurvey(ctx, { s, resps }) : null
     return { ...parseJsonCols(s, ["classes"]), responses: resps.reduce((a, r) => a + (r.count ?? 1), 0), byClass, byMode, result }
   })))
-  return c.json({ surveys, population: ctx.population })
+  const modes = Object.entries(MODES).map(([key, m]) => {
+    const codes = key === "pesawat" ? ["TR_PSW_DOM1", "TR_PSW_DOM2", "TR_PSW_DOM3"] : [m.factor]
+    return { key, per: m.per, load: m.load ?? null, factors: codes.map((cd) => ({ code: cd, name: ctx.fe[cd]?.name ?? cd, value: ctx.fe[cd]?.value ?? null, unit: ctx.fe[cd]?.unit ?? "", source: ctx.fe[cd]?.source ?? "" })) }
+  })
+  return c.json({ surveys, population: ctx.population, schoolDays: ctx.org.school_days_per_week ?? 6, modes })
 })
 // Survei mobilitas dibuat & dikelola Operator/Admin; Petugas Monitoring hanya memantau dan membagikan tautannya
 field.post("/orgs/:orgId/mobility/surveys", async (c) => {
